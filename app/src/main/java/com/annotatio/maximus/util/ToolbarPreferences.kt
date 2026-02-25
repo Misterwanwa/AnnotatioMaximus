@@ -11,6 +11,7 @@ private val DEFAULT_VISIBILITY = mapOf(
     "pen" to true,
     "marker" to true,
     "underline" to true,
+    "strikethrough" to true,
     "note" to true,
     "comment" to true,
     "eraser" to true,

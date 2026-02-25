@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.ModeComment
 import androidx.compose.material.icons.filled.FormatUnderlined
+import androidx.compose.material.icons.filled.FormatStrikethrough
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
@@ -58,6 +59,7 @@ private val BUTTON_ENTRIES = listOf(
     "save" to Pair("Speichern", Icons.Default.Save),
     "shapes" to Pair("Formen", Icons.Outlined.Interests),
     "signature" to Pair("Unterschrift", Icons.Default.Gesture),
+    "strikethrough" to Pair("Durchstreichen", Icons.Default.FormatStrikethrough),
     "underline" to Pair("Unterstreichen", Icons.Default.FormatUnderlined),
     "undo" to Pair("Zurück", Icons.Default.Undo)
 )

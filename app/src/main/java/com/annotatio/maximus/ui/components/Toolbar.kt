@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.ModeComment
 import androidx.compose.material.icons.filled.FormatUnderlined
+import androidx.compose.material.icons.filled.FormatStrikethrough
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
@@ -89,7 +90,7 @@ fun AnnotationToolbar(
                 Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
             }
 
-            if (show("pen") || show("marker") || show("underline") || show("note") || show("comment") || show("eraser") || show("shapes") || show("signature") || show("gemini")) {
+            if (show("pen") || show("marker") || show("underline") || show("strikethrough") || show("note") || show("comment") || show("eraser") || show("shapes") || show("signature") || show("gemini")) {
                 ToolbarDivider()
             }
 
@@ -133,6 +134,21 @@ fun AnnotationToolbar(
                         onToolSelected(
                             if (activeTool == AnnotationType.UNDERLINE) null
                             else AnnotationType.UNDERLINE
+                        )
+                    }
+                )
+            }
+
+            if (show("strikethrough")) {
+                ToolToggleButton(
+                    icon = Icons.Default.FormatStrikethrough,
+                    label = "Durchstreichen",
+                    isActive = activeTool == AnnotationType.STRIKETHROUGH,
+                    enabled = hasDocument,
+                    onClick = {
+                        onToolSelected(
+                            if (activeTool == AnnotationType.STRIKETHROUGH) null
+                            else AnnotationType.STRIKETHROUGH
                         )
                     }
                 )
