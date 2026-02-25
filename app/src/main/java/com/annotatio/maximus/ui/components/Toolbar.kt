@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.ModeComment
 import androidx.compose.material.icons.filled.FormatUnderlined
 import androidx.compose.material.icons.filled.FormatStrikethrough
+import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
@@ -90,7 +91,7 @@ fun AnnotationToolbar(
                 Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
             }
 
-            if (show("pen") || show("marker") || show("underline") || show("strikethrough") || show("note") || show("comment") || show("eraser") || show("shapes") || show("signature") || show("gemini")) {
+            if (show("pen") || show("marker") || show("underline") || show("strikethrough") || show("table") || show("note") || show("comment") || show("eraser") || show("shapes") || show("signature") || show("gemini")) {
                 ToolbarDivider()
             }
 
@@ -149,6 +150,21 @@ fun AnnotationToolbar(
                         onToolSelected(
                             if (activeTool == AnnotationType.STRIKETHROUGH) null
                             else AnnotationType.STRIKETHROUGH
+                        )
+                    }
+                )
+            }
+
+            if (show("table")) {
+                ToolToggleButton(
+                    icon = Icons.Default.TableChart,
+                    label = "Tabelle",
+                    isActive = activeTool == AnnotationType.TABLE,
+                    enabled = hasDocument,
+                    onClick = {
+                        onToolSelected(
+                            if (activeTool == AnnotationType.TABLE) null
+                            else AnnotationType.TABLE
                         )
                     }
                 )

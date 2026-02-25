@@ -62,6 +62,20 @@ sealed class Annotation {
         val color: Color = Color.Black
     ) : Annotation()
 
+    data class Table(
+        override val pageIndex: Int,
+        override val id: String = UUID.randomUUID().toString(),
+        val x: Float,
+        val y: Float,
+        val width: Float,
+        val height: Float,
+        val rows: Int,
+        val cols: Int,
+        // cells[row][col] = text
+        val cells: List<List<String>>,
+        val color: Color = Color.Black
+    ) : Annotation()
+
     data class Comment(
         override val pageIndex: Int,
         override val id: String = UUID.randomUUID().toString(),

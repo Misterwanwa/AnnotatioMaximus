@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.ModeComment
 import androidx.compose.material.icons.filled.FormatUnderlined
 import androidx.compose.material.icons.filled.FormatStrikethrough
+import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
@@ -60,6 +61,7 @@ private val BUTTON_ENTRIES = listOf(
     "shapes" to Pair("Formen", Icons.Outlined.Interests),
     "signature" to Pair("Unterschrift", Icons.Default.Gesture),
     "strikethrough" to Pair("Durchstreichen", Icons.Default.FormatStrikethrough),
+    "table" to Pair("Tabelle", Icons.Default.TableChart),
     "underline" to Pair("Unterstreichen", Icons.Default.FormatUnderlined),
     "undo" to Pair("Zurück", Icons.Default.Undo)
 )

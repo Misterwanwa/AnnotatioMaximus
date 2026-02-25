@@ -60,6 +60,7 @@ fun AnnotationCanvas(
     onRequestTextNote: (Float, Float) -> Unit,
     onRequestSignature: (Float, Float) -> Unit,
     onRequestComment: (Float, Float) -> Unit,
+    onRequestTable: (Float, Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var currentPoints by remember { mutableStateOf<List<PathPoint>>(emptyList()) }
@@ -259,6 +260,15 @@ fun AnnotationCanvas(
             }
         }
 
+        AnnotationType.TABLE -> {
+            Modifier.pointerInput(Unit) {
+                detectTapGestures { offset ->
+                    val normalized = screenToNormalized(offset, pageInfo)
+                    onRequestTable(normalized.x, normalized.y)
+                }
+            }
+        }
+
         AnnotationType.SIGNATURE -> {
             Modifier.pointerInput(Unit) {
                 detectTapGestures { offset ->
@@ -315,6 +325,11 @@ fun AnnotationCanvas(
                             is Annotation.Comment -> {
                                 abs(annotation.x - normalized.x) < threshold * 2 &&
                                         abs(annotation.y - normalized.y) < threshold * 2
+                            }
+
+                            is Annotation.Table -> {
+                                normalized.x in annotation.x..(annotation.x + annotation.width) &&
+                                        normalized.y in annotation.y..(annotation.y + annotation.height)
                             }
                         }
                     }
@@ -857,6 +872,37 @@ private fun DrawScope.drawAnnotation(annotation: Annotation, pageInfo: PdfPageIn
                 strokeWidth = 3f,
                 cap = StrokeCap.Round
             )
+        }
+
+        is Annotation.Table -> {
+            val topLeft = normalizedToScreen(PathPoint(annotation.x, annotation.y), pageInfo)
+            val bottomRight = normalizedToScreen(
+                PathPoint(annotation.x + annotation.width, annotation.y + annotation.height), pageInfo
+            )
+            val tableW = bottomRight.x - topLeft.x
+            val tableH = bottomRight.y - topLeft.y
+            val cellW = tableW / annotation.cols
+            val cellH = tableH / annotation.rows
+
+            // Draw cell borders
+            for (row in 0..annotation.rows) {
+                val yPos = topLeft.y + row * cellH
+                drawLine(
+                    color = annotation.color,
+                    start = Offset(topLeft.x, yPos),
+                    end = Offset(bottomRight.x, yPos),
+                    strokeWidth = 1.5f
+                )
+            }
+            for (col in 0..annotation.cols) {
+                val xPos = topLeft.x + col * cellW
+                drawLine(
+                    color = annotation.color,
+                    start = Offset(xPos, topLeft.y),
+                    end = Offset(xPos, bottomRight.y),
+                    strokeWidth = 1.5f
+                )
+            }
         }
 
         is Annotation.Comment -> {

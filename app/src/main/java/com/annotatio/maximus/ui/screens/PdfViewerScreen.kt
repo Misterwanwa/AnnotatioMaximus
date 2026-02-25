@@ -47,6 +47,8 @@ import com.annotatio.maximus.ui.components.AnnotationToolbar
 import com.annotatio.maximus.ui.components.GeminiSketchDialog
 import com.annotatio.maximus.ui.components.SettingsDialog
 import com.annotatio.maximus.ui.components.SignatureDialog
+import com.annotatio.maximus.ui.components.TableEditorDialog
+import com.annotatio.maximus.ui.components.TablePickerDialog
 import com.annotatio.maximus.ui.components.PdfPageInfo
 import com.annotatio.maximus.ui.components.PdfViewer
 import com.annotatio.maximus.ui.components.ToolOptionsPanel
@@ -106,6 +108,14 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
     var commentPosition by remember { mutableStateOf(Pair(0f, 0f)) }
     var commentInput by remember { mutableStateOf("") }
     var editingComment by remember { mutableStateOf<Annotation.Comment?>(null) }
+
+    // Table dialog state (two-step: picker → editor)
+    var showTablePicker by remember { mutableStateOf(false) }
+    var showTableEditor by remember { mutableStateOf(false) }
+    var tablePosition by remember { mutableStateOf(Pair(0f, 0f)) }
+    var tablePendingRows by remember { mutableStateOf(3) }
+    var tablePendingCols by remember { mutableStateOf(3) }
+    var editingTable by remember { mutableStateOf<Annotation.Table?>(null) }
 
     // File picker
     val openFileLauncher = rememberLauncherForActivityResult(
@@ -247,6 +257,54 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
         )
     }
 
+    // Table picker dialog (matrix selection)
+    if (showTablePicker) {
+        TablePickerDialog(
+            onDismiss = { showTablePicker = false },
+            onSizeSelected = { rows, cols ->
+                tablePendingRows = rows
+                tablePendingCols = cols
+                showTablePicker = false
+                showTableEditor = true
+            }
+        )
+    }
+
+    // Table editor dialog (fill in cell texts)
+    if (showTableEditor) {
+        val existing = editingTable
+        TableEditorDialog(
+            rows = if (existing != null) existing.rows else tablePendingRows,
+            cols = if (existing != null) existing.cols else tablePendingCols,
+            initialCells = existing?.cells,
+            onDismiss = {
+                showTableEditor = false
+                editingTable = null
+            },
+            onConfirm = { cells ->
+                if (existing != null) {
+                    viewModel.updateAnnotation(existing.copy(cells = cells))
+                } else {
+                    viewModel.addAnnotation(
+                        Annotation.Table(
+                            pageIndex = currentPage,
+                            x = tablePosition.first,
+                            y = tablePosition.second,
+                            width = 0.5f,
+                            height = 0.25f,
+                            rows = tablePendingRows,
+                            cols = tablePendingCols,
+                            cells = cells,
+                            color = penColor
+                        )
+                    )
+                }
+                showTableEditor = false
+                editingTable = null
+            }
+        )
+    }
+
     if (isLandscape) {
         // Landscape layout: Toolbar on the left, content on the right
         Row(modifier = Modifier.fillMaxSize()) {
@@ -322,6 +380,11 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                                 commentInput = ""
                                 editingComment = null
                                 showCommentDialog = true
+                            },
+                            onRequestTable = { x, y ->
+                                tablePosition = Pair(x, y)
+                                editingTable = null
+                                showTablePicker = true
                             },
                             modifier = Modifier.fillMaxSize()
                         )
@@ -453,6 +516,11 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                                 commentInput = ""
                                 editingComment = null
                                 showCommentDialog = true
+                            },
+                            onRequestTable = { x, y ->
+                                tablePosition = Pair(x, y)
+                                editingTable = null
+                                showTablePicker = true
                             },
                             modifier = Modifier.fillMaxSize()
                         )

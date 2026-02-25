@@ -5,6 +5,7 @@ enum class AnnotationType {
     HIGHLIGHTER,
     UNDERLINE,
     STRIKETHROUGH,
+    TABLE,
     TEXT_NOTE,
     COMMENT,
     ERASER,
