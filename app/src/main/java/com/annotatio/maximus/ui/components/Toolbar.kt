@@ -1,0 +1,321 @@
+package com.annotatio.maximus.ui.components
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BorderColor
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Draw
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.Rectangle
+import androidx.compose.material.icons.filled.Redo
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.StickyNote2
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material.icons.outlined.ChangeHistory
+import androidx.compose.material3.Divider
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
+import com.annotatio.maximus.model.AnnotationType
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AnnotationToolbar(
+    activeTool: AnnotationType?,
+    canUndo: Boolean,
+    canRedo: Boolean,
+    hasDocument: Boolean,
+    toolbarVisibility: Map<String, Boolean>,
+    onOpenFile: () -> Unit,
+    onSettingsClick: () -> Unit,
+    onToolSelected: (AnnotationType?) -> Unit,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit,
+    onSave: () -> Unit,
+    onOpenGeminiSketch: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val show = { id: String -> toolbarVisibility[id] != false }
+
+    TopAppBar(
+        title = {
+            Text(
+                text = "Annotatio Maximus",
+                style = MaterialTheme.typography.titleLarge
+            )
+        },
+        actions = {
+            // Ordner
+            if (show("open")) {
+                IconButton(onClick = onOpenFile) {
+                    Icon(Icons.Default.FolderOpen, contentDescription = "PDF öffnen")
+                }
+            }
+
+            // Einstellungen
+            IconButton(onClick = onSettingsClick) {
+                Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
+            }
+
+            if (show("pen") || show("marker") || show("note") || show("eraser") || show("circle") || show("square") || show("rectangle") || show("triangle") || show("signature") || show("gemini")) {
+                ToolbarDivider()
+            }
+
+            // Stift
+            if (show("pen")) {
+                ToolToggleButton(
+                    icon = Icons.Default.Draw,
+                    label = "Stift",
+                    isActive = activeTool == AnnotationType.PEN,
+                    enabled = hasDocument,
+                    onClick = {
+                        onToolSelected(
+                            if (activeTool == AnnotationType.PEN) null else AnnotationType.PEN
+                        )
+                    }
+                )
+            }
+
+            if (show("marker")) {
+                ToolToggleButton(
+                    icon = Icons.Default.BorderColor,
+                    label = "Marker",
+                    isActive = activeTool == AnnotationType.HIGHLIGHTER,
+                    enabled = hasDocument,
+                    onClick = {
+                        onToolSelected(
+                            if (activeTool == AnnotationType.HIGHLIGHTER) null
+                            else AnnotationType.HIGHLIGHTER
+                        )
+                    }
+                )
+            }
+
+            if (show("note")) {
+                ToolToggleButton(
+                    icon = Icons.Default.StickyNote2,
+                    label = "Notiz",
+                    isActive = activeTool == AnnotationType.TEXT_NOTE,
+                    enabled = hasDocument,
+                    onClick = {
+                        onToolSelected(
+                            if (activeTool == AnnotationType.TEXT_NOTE) null
+                            else AnnotationType.TEXT_NOTE
+                        )
+                    }
+                )
+            }
+
+            if (show("eraser")) {
+                ToolToggleButton(
+                    icon = Icons.Default.CleaningServices,
+                    label = "Radierer",
+                    isActive = activeTool == AnnotationType.ERASER,
+                    enabled = hasDocument,
+                    onClick = {
+                        onToolSelected(
+                            if (activeTool == AnnotationType.ERASER) null
+                            else AnnotationType.ERASER
+                        )
+                    }
+                )
+            }
+
+            // Formen
+            if (show("circle")) {
+                ToolToggleButton(
+                    icon = Icons.Default.RadioButtonUnchecked,
+                    label = "Kreis",
+                    isActive = activeTool == AnnotationType.CIRCLE,
+                    enabled = hasDocument,
+                    onClick = {
+                        onToolSelected(
+                            if (activeTool == AnnotationType.CIRCLE) null else AnnotationType.CIRCLE
+                        )
+                    }
+                )
+            }
+
+            if (show("square")) {
+                ToolToggleButton(
+                    icon = Icons.Default.Stop,
+                    label = "Quadrat",
+                    isActive = activeTool == AnnotationType.SQUARE,
+                    enabled = hasDocument,
+                    onClick = {
+                        onToolSelected(
+                            if (activeTool == AnnotationType.SQUARE) null else AnnotationType.SQUARE
+                        )
+                    }
+                )
+            }
+
+            if (show("rectangle")) {
+                ToolToggleButton(
+                    icon = Icons.Default.Rectangle,
+                    label = "Rechteck",
+                    isActive = activeTool == AnnotationType.RECTANGLE,
+                    enabled = hasDocument,
+                    onClick = {
+                        onToolSelected(
+                            if (activeTool == AnnotationType.RECTANGLE) null else AnnotationType.RECTANGLE
+                        )
+                    }
+                )
+            }
+
+            if (show("triangle")) {
+                ToolToggleButton(
+                    icon = Icons.Filled.ChangeHistory,
+                    label = "Dreieck",
+                    isActive = activeTool == AnnotationType.TRIANGLE,
+                    enabled = hasDocument,
+                    onClick = {
+                        onToolSelected(
+                            if (activeTool == AnnotationType.TRIANGLE) null else AnnotationType.TRIANGLE
+                        )
+                    }
+                )
+            }
+
+            if (show("signature")) {
+                ToolToggleButton(
+                    icon = Icons.Default.BorderColor,
+                    label = "Unterschrift",
+                    isActive = activeTool == AnnotationType.SIGNATURE,
+                    enabled = hasDocument,
+                    onClick = {
+                        onToolSelected(
+                            if (activeTool == AnnotationType.SIGNATURE) null else AnnotationType.SIGNATURE
+                        )
+                    }
+                )
+            }
+
+            if (show("gemini")) {
+                IconButton(onClick = onOpenGeminiSketch) {
+                    Icon(
+                        Icons.Default.SmartToy,
+                        contentDescription = "Freihand-Skizze für Gemini"
+                    )
+                }
+            }
+
+            if (show("undo") || show("redo")) {
+                ToolbarDivider()
+            }
+
+            if (show("undo")) {
+                IconButton(onClick = onUndo, enabled = canUndo) {
+                    Icon(
+                        Icons.Default.Undo,
+                        contentDescription = "Zurück",
+                        tint = if (canUndo) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    )
+                }
+            }
+            if (show("redo")) {
+                IconButton(onClick = onRedo, enabled = canRedo) {
+                    Icon(
+                        Icons.Default.Redo,
+                        contentDescription = "Vorwärts",
+                        tint = if (canRedo) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    )
+                }
+            }
+
+            if (show("save")) {
+                ToolbarDivider()
+            }
+
+            if (show("save")) {
+                IconButton(onClick = onSave, enabled = hasDocument) {
+                    Icon(
+                        Icons.Default.Save,
+                        contentDescription = "Speichern",
+                        tint = if (hasDocument) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    )
+                }
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        modifier = modifier
+    )
+}
+
+@Composable
+private fun ToolToggleButton(
+    icon: ImageVector,
+    label: String,
+    isActive: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    val bgColor = if (isActive) MaterialTheme.colorScheme.primaryContainer
+    else Color.Transparent
+    val iconTint = when {
+        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        isActive -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+
+    Box(
+        modifier = Modifier
+            .padding(horizontal = 2.dp)
+            .clip(CircleShape)
+            .background(bgColor)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = iconTint,
+            modifier = Modifier.size(24.dp)
+        )
+    }
+}
+
+@Composable
+private fun ToolbarDivider() {
+    Spacer(modifier = Modifier.width(4.dp))
+    Divider(
+        modifier = Modifier
+            .height(24.dp)
+            .width(1.dp),
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+    )
+    Spacer(modifier = Modifier.width(4.dp))
+}

@@ -1,0 +1,30 @@
+# Claude Code
+.claude/
+
+# Android / Gradle
+*.iml
+.gradle/
+local.properties
+.idea/
+.DS_Store
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Kotlin
+*.class
+
+# Keystore (NEVER commit!)
+*.jks
+*.keystore
+
+# Generated
+app/build/
+
+# Logs
+*.log
