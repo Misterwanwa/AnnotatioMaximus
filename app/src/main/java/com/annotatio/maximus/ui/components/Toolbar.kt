@@ -17,16 +17,16 @@ import androidx.compose.material.icons.filled.BorderColor
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
-import androidx.compose.material.icons.filled.Rectangle
+import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.StickyNote2
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Undo
-import androidx.compose.material.icons.outlined.ChangeHistory
+import androidx.compose.material.icons.outlined.Interests
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -36,6 +36,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -83,7 +87,7 @@ fun AnnotationToolbar(
                 Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
             }
 
-            if (show("pen") || show("marker") || show("note") || show("eraser") || show("circle") || show("square") || show("rectangle") || show("triangle") || show("signature") || show("gemini")) {
+            if (show("pen") || show("marker") || show("note") || show("eraser") || show("shapes") || show("signature") || show("gemini")) {
                 ToolbarDivider()
             }
 
@@ -147,66 +151,49 @@ fun AnnotationToolbar(
                 )
             }
 
-            // Formen
-            if (show("circle")) {
-                ToolToggleButton(
-                    icon = Icons.Default.RadioButtonUnchecked,
-                    label = "Kreis",
-                    isActive = activeTool == AnnotationType.CIRCLE,
-                    enabled = hasDocument,
-                    onClick = {
-                        onToolSelected(
-                            if (activeTool == AnnotationType.CIRCLE) null else AnnotationType.CIRCLE
-                        )
+            // Formen (Dropdown)
+            val shapeTools = listOf(
+                AnnotationType.CIRCLE,
+                AnnotationType.SQUARE,
+                AnnotationType.RECTANGLE,
+                AnnotationType.TRIANGLE
+            )
+            val isShapeActive = activeTool in shapeTools
+            if (show("shapes")) {
+                var showShapeMenu by remember { mutableStateOf(false) }
+                Box {
+                    ToolToggleButton(
+                        icon = Icons.Outlined.Interests,
+                        label = "Formen",
+                        isActive = isShapeActive,
+                        enabled = hasDocument,
+                        onClick = { showShapeMenu = true }
+                    )
+                    DropdownMenu(
+                        expanded = showShapeMenu,
+                        onDismissRequest = { showShapeMenu = false }
+                    ) {
+                        listOf(
+                            AnnotationType.CIRCLE to "Kreis",
+                            AnnotationType.SQUARE to "Quadrat",
+                            AnnotationType.RECTANGLE to "Rechteck",
+                            AnnotationType.TRIANGLE to "Dreieck"
+                        ).forEach { (type, label) ->
+                            DropdownMenuItem(
+                                text = { Text(label) },
+                                onClick = {
+                                    showShapeMenu = false
+                                    onToolSelected(if (activeTool == type) null else type)
+                                }
+                            )
+                        }
                     }
-                )
-            }
-
-            if (show("square")) {
-                ToolToggleButton(
-                    icon = Icons.Default.Stop,
-                    label = "Quadrat",
-                    isActive = activeTool == AnnotationType.SQUARE,
-                    enabled = hasDocument,
-                    onClick = {
-                        onToolSelected(
-                            if (activeTool == AnnotationType.SQUARE) null else AnnotationType.SQUARE
-                        )
-                    }
-                )
-            }
-
-            if (show("rectangle")) {
-                ToolToggleButton(
-                    icon = Icons.Default.Rectangle,
-                    label = "Rechteck",
-                    isActive = activeTool == AnnotationType.RECTANGLE,
-                    enabled = hasDocument,
-                    onClick = {
-                        onToolSelected(
-                            if (activeTool == AnnotationType.RECTANGLE) null else AnnotationType.RECTANGLE
-                        )
-                    }
-                )
-            }
-
-            if (show("triangle")) {
-                ToolToggleButton(
-                    icon = Icons.Filled.ChangeHistory,
-                    label = "Dreieck",
-                    isActive = activeTool == AnnotationType.TRIANGLE,
-                    enabled = hasDocument,
-                    onClick = {
-                        onToolSelected(
-                            if (activeTool == AnnotationType.TRIANGLE) null else AnnotationType.TRIANGLE
-                        )
-                    }
-                )
+                }
             }
 
             if (show("signature")) {
                 ToolToggleButton(
-                    icon = Icons.Default.BorderColor,
+                    icon = Icons.Default.Gesture,
                     label = "Unterschrift",
                     isActive = activeTool == AnnotationType.SIGNATURE,
                     enabled = hasDocument,

@@ -16,17 +16,15 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
-import androidx.compose.material.icons.filled.Rectangle
+import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.StickyNote2
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Undo
-import androidx.compose.material.icons.outlined.ChangeHistory
+import androidx.compose.material.icons.outlined.Interests
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -47,19 +45,16 @@ import androidx.compose.ui.unit.dp
  * Einträge für die Button-Sichtbarkeit, alphabetisch nach deutschem Label sortiert.
  */
 private val BUTTON_ENTRIES = listOf(
-    "circle" to Pair("Kreis", Icons.Default.RadioButtonUnchecked),
     "eraser" to Pair("Radierer", Icons.Default.CleaningServices),
     "gemini" to Pair("KI-Bild", Icons.Default.SmartToy),
     "marker" to Pair("Marker", Icons.Default.BorderColor),
     "note" to Pair("Notiz", Icons.Default.StickyNote2),
     "open" to Pair("Ordner", Icons.Default.FolderOpen),
     "pen" to Pair("Stift", Icons.Default.Draw),
-    "rectangle" to Pair("Rechteck", Icons.Default.Rectangle),
     "redo" to Pair("Vorwärts", Icons.Default.Redo),
     "save" to Pair("Speichern", Icons.Default.Save),
-    "signature" to Pair("Unterschrift", Icons.Default.BorderColor),
-    "square" to Pair("Quadrat", Icons.Default.Stop),
-    "triangle" to Pair("Dreieck", Icons.Outlined.ChangeHistory),
+    "shapes" to Pair("Formen", Icons.Outlined.Interests),
+    "signature" to Pair("Unterschrift", Icons.Default.Gesture),
     "undo" to Pair("Zurück", Icons.Default.Undo)
 )
 

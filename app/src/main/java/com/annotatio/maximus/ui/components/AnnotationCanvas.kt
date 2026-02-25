@@ -233,6 +233,60 @@ fun AnnotationCanvas(
                 pageInfo = pageInfo
             )
         }
+
+        // Draw in-progress shape preview
+        val start = dragStart
+        val current = dragCurrent
+        if (start != null && current != null) {
+            val left = minOf(start.x, current.x)
+            val top = minOf(start.y, current.y)
+            val width = abs(current.x - start.x)
+            val height = abs(current.y - start.y)
+            val previewColor = penColor.copy(alpha = 0.5f)
+            when (activeTool) {
+                AnnotationType.CIRCLE -> {
+                    val radius = min(width, height) / 2f
+                    val center = Offset(left + width / 2f, top + height / 2f)
+                    drawCircle(
+                        color = previewColor,
+                        radius = radius,
+                        center = center,
+                        style = Stroke(width = penStrokeWidth)
+                    )
+                }
+                AnnotationType.SQUARE -> {
+                    val side = min(width, height)
+                    drawRect(
+                        color = previewColor,
+                        topLeft = Offset(left, top),
+                        size = Size(side, side),
+                        style = Stroke(width = penStrokeWidth)
+                    )
+                }
+                AnnotationType.RECTANGLE -> {
+                    drawRect(
+                        color = previewColor,
+                        topLeft = Offset(left, top),
+                        size = Size(width, height),
+                        style = Stroke(width = penStrokeWidth)
+                    )
+                }
+                AnnotationType.TRIANGLE -> {
+                    val path = Path().apply {
+                        moveTo(left + width / 2f, top)
+                        lineTo(left, top + height)
+                        lineTo(left + width, top + height)
+                        close()
+                    }
+                    drawPath(
+                        path = path,
+                        color = previewColor,
+                        style = Stroke(width = penStrokeWidth)
+                    )
+                }
+                else -> {}
+            }
+        }
     }
 }
 

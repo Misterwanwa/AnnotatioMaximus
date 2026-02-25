@@ -12,6 +12,8 @@ private val DEFAULT_VISIBILITY = mapOf(
     "marker" to true,
     "note" to true,
     "eraser" to true,
+    "shapes" to true,
+    "signature" to true,
     "gemini" to true,
     "undo" to true,
     "redo" to true,
