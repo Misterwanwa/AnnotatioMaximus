@@ -76,6 +76,27 @@ sealed class Annotation {
         val color: Color = Color.Black
     ) : Annotation()
 
+    data class Image(
+        override val pageIndex: Int,
+        override val id: String = UUID.randomUUID().toString(),
+        val x: Float,
+        val y: Float,
+        val width: Float,
+        val height: Float,
+        // URI as string for persistence
+        val uriString: String
+    ) : Annotation()
+
+    data class Link(
+        override val pageIndex: Int,
+        override val id: String = UUID.randomUUID().toString(),
+        val x: Float,
+        val y: Float,
+        val displayText: String,
+        val url: String,
+        val color: Color = Color(0xFF1565C0)
+    ) : Annotation()
+
     data class Comment(
         override val pageIndex: Int,
         override val id: String = UUID.randomUUID().toString(),

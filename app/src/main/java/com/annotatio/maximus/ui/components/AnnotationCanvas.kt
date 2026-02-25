@@ -1,5 +1,9 @@
 package com.annotatio.maximus.ui.components
 
+import android.graphics.BitmapFactory
+import android.graphics.Paint as AndroidPaint
+import android.graphics.Typeface
+import android.net.Uri
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -27,12 +31,16 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -61,11 +69,30 @@ fun AnnotationCanvas(
     onRequestSignature: (Float, Float) -> Unit,
     onRequestComment: (Float, Float) -> Unit,
     onRequestTable: (Float, Float) -> Unit,
+    onRequestImage: (Float, Float) -> Unit = {},
+    onRequestLink: (Float, Float) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var currentPoints by remember { mutableStateOf<List<PathPoint>>(emptyList()) }
     var dragStart by remember { mutableStateOf<Offset?>(null) }
     var dragCurrent by remember { mutableStateOf<Offset?>(null) }
+
+    // Cache for loaded image bitmaps: uriString -> ImageBitmap
+    val imageBitmapCache = remember { mutableMapOf<String, ImageBitmap?>() }
+    // Load any Image annotations not yet in cache
+    val imageAnnotations = annotations.filterIsInstance<Annotation.Image>()
+    for (img in imageAnnotations) {
+        if (!imageBitmapCache.containsKey(img.uriString)) {
+            imageBitmapCache[img.uriString] = try {
+                context.contentResolver.openInputStream(Uri.parse(img.uriString))?.use { stream ->
+                    BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
 
     val gestureModifier = when (activeTool) {
         AnnotationType.PEN, AnnotationType.HIGHLIGHTER -> {
@@ -278,6 +305,29 @@ fun AnnotationCanvas(
             }
         }
 
+        AnnotationType.IMAGE -> {
+            Modifier.pointerInput(Unit) {
+                detectTapGestures { offset ->
+                    val normalized = screenToNormalized(offset, pageInfo)
+                    onRequestImage(normalized.x, normalized.y)
+                }
+            }
+        }
+
+        AnnotationType.LINK -> {
+            Modifier.pointerInput(Unit) {
+                detectTapGestures { offset ->
+                    val normalized = screenToNormalized(offset, pageInfo)
+                    onRequestLink(normalized.x, normalized.y)
+                }
+            }
+        }
+
+        AnnotationType.SELECT, AnnotationType.LASSO -> {
+            // Handled by SelectLassoOverlay
+            Modifier
+        }
+
         AnnotationType.ERASER -> {
             Modifier.pointerInput(Unit) {
                 detectTapGestures { offset ->
@@ -331,6 +381,16 @@ fun AnnotationCanvas(
                                 normalized.x in annotation.x..(annotation.x + annotation.width) &&
                                         normalized.y in annotation.y..(annotation.y + annotation.height)
                             }
+
+                            is Annotation.Image -> {
+                                normalized.x in annotation.x..(annotation.x + annotation.width) &&
+                                        normalized.y in annotation.y..(annotation.y + annotation.height)
+                            }
+
+                            is Annotation.Link -> {
+                                abs(annotation.x - normalized.x) < threshold * 3 &&
+                                        abs(annotation.y - normalized.y) < threshold * 2
+                            }
                         }
                     }
                     hit?.let { onRemoveAnnotation(it.id) }
@@ -346,7 +406,7 @@ fun AnnotationCanvas(
     ) {
         // Draw existing annotations
         for (annotation in annotations) {
-            drawAnnotation(annotation, pageInfo)
+            drawAnnotation(annotation, pageInfo, imageBitmapCache)
         }
 
         // Draw in-progress stroke
@@ -441,6 +501,20 @@ fun AnnotationDisplayOverlay(
 ) {
     if (annotations.isEmpty()) return
 
+    val context = LocalContext.current
+    val imageBitmapCache = remember { mutableMapOf<String, ImageBitmap?>() }
+    for (img in annotations.filterIsInstance<Annotation.Image>()) {
+        if (!imageBitmapCache.containsKey(img.uriString)) {
+            imageBitmapCache[img.uriString] = try {
+                context.contentResolver.openInputStream(Uri.parse(img.uriString))?.use { stream ->
+                    BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
     val tapModifier = if (onCommentTapped != null) {
         Modifier.pointerInput(annotations, pageInfo) {
             detectTapGestures { offset ->
@@ -456,7 +530,7 @@ fun AnnotationDisplayOverlay(
 
     Canvas(modifier = modifier.fillMaxSize().then(tapModifier)) {
         for (annotation in annotations) {
-            drawAnnotation(annotation, pageInfo)
+            drawAnnotation(annotation, pageInfo, imageBitmapCache)
         }
     }
 }
@@ -496,7 +570,7 @@ fun AnnotationLayerOverlay(
         ) {
             // Draw all annotations as gewohnt
             for (annotation in annotations) {
-                drawAnnotation(annotation, pageInfo)
+                drawAnnotation(annotation, pageInfo, emptyMap())
             }
 
             // Draw selection rectangle for the selected stroke
@@ -745,7 +819,11 @@ private fun computeStrokeBoundsNormalized(stroke: Annotation.Stroke): Rect {
     return Rect(minX, minY, maxX, maxY)
 }
 
-private fun DrawScope.drawAnnotation(annotation: Annotation, pageInfo: PdfPageInfo) {
+internal fun DrawScope.drawAnnotation(
+    annotation: Annotation,
+    pageInfo: PdfPageInfo,
+    imageBitmapCache: Map<String, ImageBitmap?>
+) {
     when (annotation) {
         is Annotation.Stroke -> {
             val path = annotation.path
@@ -934,6 +1012,55 @@ private fun DrawScope.drawAnnotation(annotation: Annotation, pageInfo: PdfPageIn
                 color = Color.White,
                 topLeft = Offset(pos.x - 6f, pos.y + 3f),
                 size = Size(10f, 2.5f)
+            )
+        }
+
+        is Annotation.Image -> {
+            val topLeft = normalizedToScreen(PathPoint(annotation.x, annotation.y), pageInfo)
+            val bottomRight = normalizedToScreen(
+                PathPoint(annotation.x + annotation.width, annotation.y + annotation.height), pageInfo
+            )
+            val imgW = bottomRight.x - topLeft.x
+            val imgH = bottomRight.y - topLeft.y
+            val bitmap = imageBitmapCache[annotation.uriString]
+            if (bitmap != null) {
+                drawImage(
+                    image = bitmap,
+                    dstOffset = androidx.compose.ui.unit.IntOffset(topLeft.x.toInt(), topLeft.y.toInt()),
+                    dstSize = androidx.compose.ui.unit.IntSize(imgW.toInt().coerceAtLeast(1), imgH.toInt().coerceAtLeast(1))
+                )
+            } else {
+                // Placeholder: grey rect with "Bild" label border
+                drawRect(
+                    color = Color.LightGray.copy(alpha = 0.5f),
+                    topLeft = topLeft,
+                    size = Size(imgW, imgH)
+                )
+                drawRect(
+                    color = Color.Gray,
+                    topLeft = topLeft,
+                    size = Size(imgW, imgH),
+                    style = Stroke(width = 2f)
+                )
+            }
+        }
+
+        is Annotation.Link -> {
+            val pos = normalizedToScreen(PathPoint(annotation.x, annotation.y), pageInfo)
+            val linkColor = annotation.color
+            val textSize = 14f * density
+            val paint = AndroidPaint().apply {
+                isAntiAlias = true
+                color = linkColor.toArgb()
+                this.textSize = textSize
+                typeface = Typeface.DEFAULT
+                isUnderlineText = true
+            }
+            drawContext.canvas.nativeCanvas.drawText(
+                annotation.displayText,
+                pos.x,
+                pos.y,
+                paint
             )
         }
 

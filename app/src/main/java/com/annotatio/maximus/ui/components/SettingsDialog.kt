@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.BorderColor
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.ChevronRight
@@ -17,9 +18,12 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Gesture
+import androidx.compose.material.icons.filled.Lasso
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.ModeComment
 import androidx.compose.material.icons.filled.FormatUnderlined
 import androidx.compose.material.icons.filled.FormatStrikethrough
+import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
@@ -52,12 +56,16 @@ private val BUTTON_ENTRIES = listOf(
     "comment" to Pair("Kommentar", Icons.Default.ModeComment),
     "eraser" to Pair("Radierer", Icons.Default.CleaningServices),
     "gemini" to Pair("KI-Bild", Icons.Default.SmartToy),
+    "image" to Pair("Bild", Icons.Default.AddPhotoAlternate),
+    "lasso" to Pair("Lasso", Icons.Default.Lasso),
+    "link" to Pair("Link", Icons.Default.Link),
     "marker" to Pair("Marker", Icons.Default.BorderColor),
     "note" to Pair("Notiz", Icons.Default.StickyNote2),
     "open" to Pair("Ordner", Icons.Default.FolderOpen),
     "pen" to Pair("Stift", Icons.Default.Draw),
     "redo" to Pair("Vorwärts", Icons.Default.Redo),
     "save" to Pair("Speichern", Icons.Default.Save),
+    "select" to Pair("Auswählen", Icons.Default.NearMe),
     "shapes" to Pair("Formen", Icons.Outlined.Interests),
     "signature" to Pair("Unterschrift", Icons.Default.Gesture),
     "strikethrough" to Pair("Durchstreichen", Icons.Default.FormatStrikethrough),

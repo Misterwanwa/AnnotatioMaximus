@@ -46,6 +46,30 @@ object PdfAnnotationSaver {
                                 is Annotation.TextNote -> drawTextNote(
                                     contentStream, annotation, pageWidth, pageHeight
                                 )
+                                is Annotation.Shape -> {
+                                    // TODO: Implement shape drawing
+                                }
+                                is Annotation.Signature -> {
+                                    // TODO: Implement signature drawing
+                                }
+                                is Annotation.Underline -> {
+                                    // TODO: Implement underline drawing
+                                }
+                                is Annotation.Strikethrough -> {
+                                    // TODO: Implement strikethrough drawing
+                                }
+                                is Annotation.Table -> {
+                                    // TODO: Implement table drawing
+                                }
+                                is Annotation.Comment -> {
+                                    // TODO: Implement comment drawing
+                                }
+                                is Annotation.Image -> {
+                                    // TODO: Implement image embedding
+                                }
+                                is Annotation.Link -> {
+                                    // TODO: Implement link annotation
+                                }
                             }
                         }
                     }

@@ -40,11 +40,14 @@ import androidx.compose.ui.graphics.toArgb
 import com.annotatio.maximus.model.Annotation
 import com.annotatio.maximus.model.DrawingPath
 import com.annotatio.maximus.model.PathPoint
+import com.annotatio.maximus.model.AnnotationType
 import com.annotatio.maximus.ui.components.AnnotationCanvas
 import com.annotatio.maximus.ui.components.AnnotationDisplayOverlay
 import com.annotatio.maximus.ui.components.AnnotationLayerOverlay
 import com.annotatio.maximus.ui.components.AnnotationToolbar
 import com.annotatio.maximus.ui.components.GeminiSketchDialog
+import com.annotatio.maximus.ui.components.LinkDialog
+import com.annotatio.maximus.ui.components.SelectLassoOverlay
 import com.annotatio.maximus.ui.components.SettingsDialog
 import com.annotatio.maximus.ui.components.SignatureDialog
 import com.annotatio.maximus.ui.components.TableEditorDialog
@@ -116,6 +119,33 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
     var tablePendingRows by remember { mutableStateOf(3) }
     var tablePendingCols by remember { mutableStateOf(3) }
     var editingTable by remember { mutableStateOf<Annotation.Table?>(null) }
+
+    // Image position pending placement (after picker returns)
+    var imagePendingPosition by remember { mutableStateOf<Pair<Float, Float>?>(null) }
+
+    // Image picker launcher
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let {
+            val pos = imagePendingPosition ?: Pair(0.1f, 0.1f)
+            viewModel.addAnnotation(
+                Annotation.Image(
+                    pageIndex = currentPage,
+                    x = pos.first,
+                    y = pos.second,
+                    width = 0.4f,
+                    height = 0.3f,
+                    uriString = it.toString()
+                )
+            )
+            imagePendingPosition = null
+        }
+    }
+
+    // Link dialog state
+    var showLinkDialog by remember { mutableStateOf(false) }
+    var linkPosition by remember { mutableStateOf(Pair(0f, 0f)) }
 
     // File picker
     val openFileLauncher = rememberLauncherForActivityResult(
@@ -305,6 +335,26 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
         )
     }
 
+    // Link dialog
+    if (showLinkDialog) {
+        LinkDialog(
+            onDismiss = { showLinkDialog = false },
+            onConfirm = { url, displayText ->
+                viewModel.addAnnotation(
+                    Annotation.Link(
+                        pageIndex = currentPage,
+                        x = linkPosition.first,
+                        y = linkPosition.second,
+                        displayText = displayText.ifBlank { url },
+                        url = url,
+                        color = penColor
+                    )
+                )
+                showLinkDialog = false
+            }
+        )
+    }
+
     if (isLandscape) {
         // Landscape layout: Toolbar on the left, content on the right
         Row(modifier = Modifier.fillMaxSize()) {
@@ -357,7 +407,7 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                     // Annotation layer
                     val currentPageAnnotations = annotations[currentPage] ?: emptyList()
 
-                    if (activeTool != null) {
+                    if (activeTool != null && activeTool != AnnotationType.SELECT && activeTool != AnnotationType.LASSO) {
                         // Active tool: canvas intercepts touches
                         AnnotationCanvas(
                             annotations = currentPageAnnotations,
@@ -386,6 +436,25 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                                 editingTable = null
                                 showTablePicker = true
                             },
+                            onRequestImage = { x, y ->
+                                imagePendingPosition = Pair(x, y)
+                                imagePickerLauncher.launch("image/*")
+                            },
+                            onRequestLink = { x, y ->
+                                linkPosition = Pair(x, y)
+                                showLinkDialog = true
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else if (activeTool == AnnotationType.SELECT || activeTool == AnnotationType.LASSO) {
+                        // SELECT / LASSO: show overlay for multi-selection
+                        SelectLassoOverlay(
+                            annotations = currentPageAnnotations,
+                            pageInfo = pageInfo,
+                            activeTool = activeTool!!,
+                            onUpdateAnnotation = viewModel::updateAnnotation,
+                            onRemoveAnnotations = { ids -> ids.forEach { viewModel.removeAnnotation(it) } },
+                            onDuplicateAnnotations = { copies -> copies.forEach { viewModel.addAnnotation(it) } },
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
@@ -493,7 +562,7 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                     // Annotation layer
                     val currentPageAnnotations = annotations[currentPage] ?: emptyList()
 
-                    if (activeTool != null) {
+                    if (activeTool != null && activeTool != AnnotationType.SELECT && activeTool != AnnotationType.LASSO) {
                         // Active tool: canvas intercepts touches
                         AnnotationCanvas(
                             annotations = currentPageAnnotations,
@@ -522,6 +591,25 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                                 editingTable = null
                                 showTablePicker = true
                             },
+                            onRequestImage = { x, y ->
+                                imagePendingPosition = Pair(x, y)
+                                imagePickerLauncher.launch("image/*")
+                            },
+                            onRequestLink = { x, y ->
+                                linkPosition = Pair(x, y)
+                                showLinkDialog = true
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else if (activeTool == AnnotationType.SELECT || activeTool == AnnotationType.LASSO) {
+                        // SELECT / LASSO: show overlay for multi-selection
+                        SelectLassoOverlay(
+                            annotations = currentPageAnnotations,
+                            pageInfo = pageInfo,
+                            activeTool = activeTool!!,
+                            onUpdateAnnotation = viewModel::updateAnnotation,
+                            onRemoveAnnotations = { ids -> ids.forEach { viewModel.removeAnnotation(it) } },
+                            onDuplicateAnnotations = { copies -> copies.forEach { viewModel.addAnnotation(it) } },
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {

@@ -13,14 +13,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.BorderColor
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Gesture
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.ModeComment
 import androidx.compose.material.icons.filled.FormatUnderlined
 import androidx.compose.material.icons.filled.FormatStrikethrough
+import androidx.compose.material.icons.filled.Lasso
+import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
@@ -91,7 +95,7 @@ fun AnnotationToolbar(
                 Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
             }
 
-            if (show("pen") || show("marker") || show("underline") || show("strikethrough") || show("table") || show("note") || show("comment") || show("eraser") || show("shapes") || show("signature") || show("gemini")) {
+            if (show("pen") || show("marker") || show("underline") || show("strikethrough") || show("table") || show("note") || show("comment") || show("eraser") || show("shapes") || show("signature") || show("image") || show("link") || show("select") || show("lasso") || show("gemini")) {
                 ToolbarDivider()
             }
 
@@ -264,6 +268,62 @@ fun AnnotationToolbar(
                     onClick = {
                         onToolSelected(
                             if (activeTool == AnnotationType.SIGNATURE) null else AnnotationType.SIGNATURE
+                        )
+                    }
+                )
+            }
+
+            if (show("image")) {
+                ToolToggleButton(
+                    icon = Icons.Default.AddPhotoAlternate,
+                    label = "Bild einfügen",
+                    isActive = activeTool == AnnotationType.IMAGE,
+                    enabled = hasDocument,
+                    onClick = {
+                        onToolSelected(
+                            if (activeTool == AnnotationType.IMAGE) null else AnnotationType.IMAGE
+                        )
+                    }
+                )
+            }
+
+            if (show("link")) {
+                ToolToggleButton(
+                    icon = Icons.Default.Link,
+                    label = "Link",
+                    isActive = activeTool == AnnotationType.LINK,
+                    enabled = hasDocument,
+                    onClick = {
+                        onToolSelected(
+                            if (activeTool == AnnotationType.LINK) null else AnnotationType.LINK
+                        )
+                    }
+                )
+            }
+
+            if (show("select")) {
+                ToolToggleButton(
+                    icon = Icons.Default.NearMe,
+                    label = "Auswählen",
+                    isActive = activeTool == AnnotationType.SELECT,
+                    enabled = hasDocument,
+                    onClick = {
+                        onToolSelected(
+                            if (activeTool == AnnotationType.SELECT) null else AnnotationType.SELECT
+                        )
+                    }
+                )
+            }
+
+            if (show("lasso")) {
+                ToolToggleButton(
+                    icon = Icons.Default.Lasso,
+                    label = "Lasso",
+                    isActive = activeTool == AnnotationType.LASSO,
+                    enabled = hasDocument,
+                    onClick = {
+                        onToolSelected(
+                            if (activeTool == AnnotationType.LASSO) null else AnnotationType.LASSO
                         )
                     }
                 )
