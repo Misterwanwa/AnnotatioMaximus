@@ -43,6 +43,7 @@ import com.annotatio.maximus.model.PathPoint
 import com.annotatio.maximus.model.AnnotationType
 import com.annotatio.maximus.ui.components.AnnotationCanvas
 import com.annotatio.maximus.ui.components.ConverterDialog
+import com.annotatio.maximus.ui.components.ScannerDialog
 import com.annotatio.maximus.ui.components.SmartGraphicPickerDialog
 import com.annotatio.maximus.ui.components.TranslatorDialog
 import com.annotatio.maximus.ui.components.loadTargetLanguage
@@ -165,6 +166,9 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
     var translatorLanguageCode by remember(context) {
         mutableStateOf(loadTargetLanguage(context))
     }
+
+    // Scanner state
+    var showScannerDialog by remember { mutableStateOf(false) }
 
     // File picker
     val openFileLauncher = rememberLauncherForActivityResult(
@@ -390,6 +394,11 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
         )
     }
 
+    // Scanner dialog
+    if (showScannerDialog) {
+        ScannerDialog(onDismiss = { showScannerDialog = false })
+    }
+
     if (isLandscape) {
         // Landscape layout: Toolbar on the left, content on the right
         Row(modifier = Modifier.fillMaxSize()) {
@@ -416,6 +425,7 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                     onOpenGeminiSketch = { showGeminiSketch = true },
                     onOpenConverter = { showConverterDialog = true },
                     onOpenTranslator = { showTranslatorDialog = true },
+                    onOpenScanner = { showScannerDialog = true },
                     onSmartGraphicSelected = { type -> pendingSmartGraphicType = type }
                 )
                 ToolOptionsPanel(

@@ -25,6 +25,7 @@ private val DEFAULT_VISIBILITY = mapOf(
     "smartgraphic" to true,
     "translator" to true,
     "converter" to true,
+    "scanner" to true,
     "gemini" to true,
     "undo" to true,
     "redo" to true,

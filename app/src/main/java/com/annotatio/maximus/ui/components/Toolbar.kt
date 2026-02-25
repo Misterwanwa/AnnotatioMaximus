@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.BorderColor
 import androidx.compose.material.icons.filled.BubbleChart
 import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Gesture
@@ -77,6 +78,7 @@ fun AnnotationToolbar(
     onOpenGeminiSketch: () -> Unit,
     onOpenConverter: () -> Unit = {},
     onOpenTranslator: () -> Unit = {},
+    onOpenScanner: () -> Unit = {},
     onSmartGraphicSelected: (com.annotatio.maximus.model.SmartGraphicType) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -102,7 +104,7 @@ fun AnnotationToolbar(
                 Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
             }
 
-            if (show("pen") || show("marker") || show("underline") || show("strikethrough") || show("table") || show("note") || show("comment") || show("eraser") || show("shapes") || show("signature") || show("image") || show("link") || show("select") || show("lasso") || show("smartgraphic") || show("translator") || show("converter") || show("gemini")) {
+            if (show("pen") || show("marker") || show("underline") || show("strikethrough") || show("table") || show("note") || show("comment") || show("eraser") || show("shapes") || show("signature") || show("image") || show("link") || show("select") || show("lasso") || show("smartgraphic") || show("translator") || show("converter") || show("gemini") || show("scanner")) {
                 ToolbarDivider()
             }
 
@@ -411,6 +413,13 @@ fun AnnotationToolbar(
                         Icons.Default.SmartToy,
                         contentDescription = "Freihand-Skizze für Gemini"
                     )
+                }
+            }
+
+            // Scanner
+            if (show("scanner")) {
+                IconButton(onClick = onOpenScanner) {
+                    Icon(Icons.Default.DocumentScanner, contentDescription = "Dokument scannen")
                 }
             }
 

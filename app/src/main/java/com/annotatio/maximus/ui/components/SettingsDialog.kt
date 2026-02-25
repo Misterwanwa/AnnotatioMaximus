@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.StickyNote2
@@ -70,6 +71,7 @@ private val BUTTON_ENTRIES = listOf(
     "pen" to Pair("Stift", Icons.Default.Draw),
     "redo" to Pair("Vorwärts", Icons.Default.Redo),
     "save" to Pair("Speichern", Icons.Default.Save),
+    "scanner" to Pair("Scanner", Icons.Default.DocumentScanner),
     "select" to Pair("Auswählen", Icons.Default.NearMe),
     "shapes" to Pair("Formen", Icons.Outlined.Interests),
     "signature" to Pair("Unterschrift", Icons.Default.Gesture),
