@@ -59,6 +59,7 @@ fun AnnotationCanvas(
     onRemoveAnnotation: (String) -> Unit,
     onRequestTextNote: (Float, Float) -> Unit,
     onRequestSignature: (Float, Float) -> Unit,
+    onRequestComment: (Float, Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var currentPoints by remember { mutableStateOf<List<PathPoint>>(emptyList()) }
@@ -154,11 +155,63 @@ fun AnnotationCanvas(
             }
         }
 
+        AnnotationType.UNDERLINE -> {
+            Modifier.pointerInput(activeTool, penColor, penStrokeWidth) {
+                detectDragGestures(
+                    onDragStart = { offset ->
+                        dragStart = offset
+                        dragCurrent = offset
+                    },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        dragCurrent = change.position
+                    },
+                    onDragEnd = {
+                        val s = dragStart
+                        val e = dragCurrent
+                        if (s != null && e != null) {
+                            val startNorm = screenToNormalized(s, pageInfo)
+                            val endNorm = screenToNormalized(e, pageInfo)
+                            val x = minOf(startNorm.x, endNorm.x)
+                            val width = abs(endNorm.x - startNorm.x)
+                            val y = (startNorm.y + endNorm.y) / 2f
+                            if (width > 0.01f) {
+                                onAddAnnotation(
+                                    Annotation.Underline(
+                                        pageIndex = currentPageIndex,
+                                        x = x,
+                                        y = y,
+                                        width = width,
+                                        color = penColor
+                                    )
+                                )
+                            }
+                        }
+                        dragStart = null
+                        dragCurrent = null
+                    },
+                    onDragCancel = {
+                        dragStart = null
+                        dragCurrent = null
+                    }
+                )
+            }
+        }
+
         AnnotationType.TEXT_NOTE -> {
             Modifier.pointerInput(Unit) {
                 detectTapGestures { offset ->
                     val normalized = screenToNormalized(offset, pageInfo)
                     onRequestTextNote(normalized.x, normalized.y)
+                }
+            }
+        }
+
+        AnnotationType.COMMENT -> {
+            Modifier.pointerInput(Unit) {
+                detectTapGestures { offset ->
+                    val normalized = screenToNormalized(offset, pageInfo)
+                    onRequestComment(normalized.x, normalized.y)
                 }
             }
         }
@@ -205,6 +258,16 @@ fun AnnotationCanvas(
                                 normalized.x in annotation.x..(annotation.x + annotation.width) &&
                                         normalized.y in annotation.y..(annotation.y + annotation.height)
                             }
+
+                            is Annotation.Underline -> {
+                                normalized.x in annotation.x..(annotation.x + annotation.width) &&
+                                        abs(annotation.y - normalized.y) < threshold * 2
+                            }
+
+                            is Annotation.Comment -> {
+                                abs(annotation.x - normalized.x) < threshold * 2 &&
+                                        abs(annotation.y - normalized.y) < threshold * 2
+                            }
                         }
                     }
                     hit?.let { onRemoveAnnotation(it.id) }
@@ -232,6 +295,22 @@ fun AnnotationCanvas(
                 strokeWidth = if (isHighlighter) penStrokeWidth * 3f else penStrokeWidth,
                 pageInfo = pageInfo
             )
+        }
+
+        // Draw in-progress underline preview
+        if (activeTool == AnnotationType.UNDERLINE) {
+            val s = dragStart
+            val e = dragCurrent
+            if (s != null && e != null) {
+                val lineY = (s.y + e.y) / 2f
+                drawLine(
+                    color = penColor.copy(alpha = 0.6f),
+                    start = Offset(minOf(s.x, e.x), lineY),
+                    end = Offset(maxOf(s.x, e.x), lineY),
+                    strokeWidth = penStrokeWidth * 1.5f,
+                    cap = StrokeCap.Round
+                )
+            }
         }
 
         // Draw in-progress shape preview
@@ -294,11 +373,25 @@ fun AnnotationCanvas(
 fun AnnotationDisplayOverlay(
     annotations: List<Annotation>,
     pageInfo: PdfPageInfo,
+    onCommentTapped: ((Annotation.Comment) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     if (annotations.isEmpty()) return
 
-    Canvas(modifier = modifier.fillMaxSize()) {
+    val tapModifier = if (onCommentTapped != null) {
+        Modifier.pointerInput(annotations, pageInfo) {
+            detectTapGestures { offset ->
+                val normalized = screenToNormalized(offset, pageInfo)
+                val threshold = 0.04f
+                val hit = annotations.filterIsInstance<Annotation.Comment>().findLast { c ->
+                    abs(c.x - normalized.x) < threshold && abs(c.y - normalized.y) < threshold
+                }
+                hit?.let { onCommentTapped(it) }
+            }
+        }
+    } else Modifier
+
+    Canvas(modifier = modifier.fillMaxSize().then(tapModifier)) {
         for (annotation in annotations) {
             drawAnnotation(annotation, pageInfo)
         }
@@ -692,6 +785,50 @@ private fun DrawScope.drawAnnotation(annotation: Annotation, pageInfo: PdfPageIn
                     )
                 }
             }
+        }
+
+        is Annotation.Underline -> {
+            val start = normalizedToScreen(PathPoint(annotation.x, annotation.y), pageInfo)
+            val end = normalizedToScreen(PathPoint(annotation.x + annotation.width, annotation.y), pageInfo)
+            drawLine(
+                color = annotation.color,
+                start = start,
+                end = end,
+                strokeWidth = 3f,
+                cap = StrokeCap.Round
+            )
+        }
+
+        is Annotation.Comment -> {
+            val pos = normalizedToScreen(PathPoint(annotation.x, annotation.y), pageInfo)
+            // Gelbes Kommentar-Fähnchen: Kreis mit "C"
+            drawCircle(
+                color = Color(0xFFFFC107),
+                radius = 14f,
+                center = pos
+            )
+            drawCircle(
+                color = Color(0xFFFF8F00),
+                radius = 14f,
+                center = pos,
+                style = Stroke(width = 2f)
+            )
+            // Kleines weißes Rechteck als Zeilen-Symbol
+            drawRect(
+                color = Color.White,
+                topLeft = Offset(pos.x - 6f, pos.y - 4f),
+                size = Size(12f, 2.5f)
+            )
+            drawRect(
+                color = Color.White,
+                topLeft = Offset(pos.x - 6f, pos.y - 0.5f),
+                size = Size(9f, 2.5f)
+            )
+            drawRect(
+                color = Color.White,
+                topLeft = Offset(pos.x - 6f, pos.y + 3f),
+                size = Size(10f, 2.5f)
+            )
         }
 
         is Annotation.Signature -> {

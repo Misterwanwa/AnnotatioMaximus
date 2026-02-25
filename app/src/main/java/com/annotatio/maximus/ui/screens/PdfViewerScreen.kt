@@ -101,6 +101,12 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
     var textNotePosition by remember { mutableStateOf(Pair(0f, 0f)) }
     var textNoteInput by remember { mutableStateOf("") }
 
+    // Comment dialog state
+    var showCommentDialog by remember { mutableStateOf(false) }
+    var commentPosition by remember { mutableStateOf(Pair(0f, 0f)) }
+    var commentInput by remember { mutableStateOf("") }
+    var editingComment by remember { mutableStateOf<Annotation.Comment?>(null) }
+
     // File picker
     val openFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -184,6 +190,63 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
         )
     }
 
+    // Comment dialog (neu anlegen oder bearbeiten)
+    if (showCommentDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showCommentDialog = false
+                commentInput = ""
+                editingComment = null
+            },
+            title = { Text(if (editingComment != null) "Kommentar bearbeiten" else "Kommentar hinzufügen") },
+            text = {
+                TextField(
+                    value = commentInput,
+                    onValueChange = { commentInput = it },
+                    placeholder = { Text("Kommentar eingeben...") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (commentInput.isNotBlank()) {
+                            val existing = editingComment
+                            if (existing != null) {
+                                viewModel.updateAnnotation(existing.copy(text = commentInput))
+                            } else {
+                                viewModel.addAnnotation(
+                                    Annotation.Comment(
+                                        pageIndex = currentPage,
+                                        x = commentPosition.first,
+                                        y = commentPosition.second,
+                                        text = commentInput,
+                                        color = penColor
+                                    )
+                                )
+                            }
+                        }
+                        showCommentDialog = false
+                        commentInput = ""
+                        editingComment = null
+                    }
+                ) {
+                    Text(if (editingComment != null) "Speichern" else "Hinzufügen")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showCommentDialog = false
+                    commentInput = ""
+                    editingComment = null
+                }) {
+                    Text("Abbrechen")
+                }
+            }
+        )
+    }
+
     if (isLandscape) {
         // Landscape layout: Toolbar on the left, content on the right
         Row(modifier = Modifier.fillMaxSize()) {
@@ -252,8 +315,13 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                                 showTextNoteDialog = true
                             },
                             onRequestSignature = { x, y ->
-                                // TODO: Handle signature request
                                 showSignatureDialog = true
+                            },
+                            onRequestComment = { x, y ->
+                                commentPosition = Pair(x, y)
+                                commentInput = ""
+                                editingComment = null
+                                showCommentDialog = true
                             },
                             modifier = Modifier.fillMaxSize()
                         )
@@ -273,6 +341,17 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                             },
                             onCopyAnnotation = { annotation ->
                                 copyStrokeToClipboard(context, annotation, pageInfo)
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        // Kommentar-Tap im Landscape-Modus
+                        AnnotationDisplayOverlay(
+                            annotations = currentPageAnnotations.filterIsInstance<Annotation.Comment>(),
+                            pageInfo = pageInfo,
+                            onCommentTapped = { comment ->
+                                editingComment = comment
+                                commentInput = comment.text
+                                showCommentDialog = true
                             },
                             modifier = Modifier.fillMaxSize()
                         )
@@ -367,16 +446,26 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                                 showTextNoteDialog = true
                             },
                             onRequestSignature = { x, y ->
-                                // TODO: Handle signature request
                                 showSignatureDialog = true
+                            },
+                            onRequestComment = { x, y ->
+                                commentPosition = Pair(x, y)
+                                commentInput = ""
+                                editingComment = null
+                                showCommentDialog = true
                             },
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
-                        // No tool: read-only display of annotations
+                        // No tool: read-only display + comment tap
                         AnnotationDisplayOverlay(
                             annotations = currentPageAnnotations,
                             pageInfo = pageInfo,
+                            onCommentTapped = { comment ->
+                                editingComment = comment
+                                commentInput = comment.text
+                                showCommentDialog = true
+                            },
                             modifier = Modifier.fillMaxSize()
                         )
                     }

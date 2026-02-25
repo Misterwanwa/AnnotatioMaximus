@@ -18,6 +18,8 @@ import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Gesture
+import androidx.compose.material.icons.filled.ModeComment
+import androidx.compose.material.icons.filled.FormatUnderlined
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
@@ -87,7 +89,7 @@ fun AnnotationToolbar(
                 Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
             }
 
-            if (show("pen") || show("marker") || show("note") || show("eraser") || show("shapes") || show("signature") || show("gemini")) {
+            if (show("pen") || show("marker") || show("underline") || show("note") || show("comment") || show("eraser") || show("shapes") || show("signature") || show("gemini")) {
                 ToolbarDivider()
             }
 
@@ -121,6 +123,21 @@ fun AnnotationToolbar(
                 )
             }
 
+            if (show("underline")) {
+                ToolToggleButton(
+                    icon = Icons.Default.FormatUnderlined,
+                    label = "Unterstreichen",
+                    isActive = activeTool == AnnotationType.UNDERLINE,
+                    enabled = hasDocument,
+                    onClick = {
+                        onToolSelected(
+                            if (activeTool == AnnotationType.UNDERLINE) null
+                            else AnnotationType.UNDERLINE
+                        )
+                    }
+                )
+            }
+
             if (show("note")) {
                 ToolToggleButton(
                     icon = Icons.Default.StickyNote2,
@@ -131,6 +148,21 @@ fun AnnotationToolbar(
                         onToolSelected(
                             if (activeTool == AnnotationType.TEXT_NOTE) null
                             else AnnotationType.TEXT_NOTE
+                        )
+                    }
+                )
+            }
+
+            if (show("comment")) {
+                ToolToggleButton(
+                    icon = Icons.Default.ModeComment,
+                    label = "Kommentar",
+                    isActive = activeTool == AnnotationType.COMMENT,
+                    enabled = hasDocument,
+                    onClick = {
+                        onToolSelected(
+                            if (activeTool == AnnotationType.COMMENT) null
+                            else AnnotationType.COMMENT
                         )
                     }
                 )

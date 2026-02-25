@@ -17,6 +17,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Gesture
+import androidx.compose.material.icons.filled.ModeComment
+import androidx.compose.material.icons.filled.FormatUnderlined
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
@@ -45,6 +47,7 @@ import androidx.compose.ui.unit.dp
  * Einträge für die Button-Sichtbarkeit, alphabetisch nach deutschem Label sortiert.
  */
 private val BUTTON_ENTRIES = listOf(
+    "comment" to Pair("Kommentar", Icons.Default.ModeComment),
     "eraser" to Pair("Radierer", Icons.Default.CleaningServices),
     "gemini" to Pair("KI-Bild", Icons.Default.SmartToy),
     "marker" to Pair("Marker", Icons.Default.BorderColor),
@@ -55,6 +58,7 @@ private val BUTTON_ENTRIES = listOf(
     "save" to Pair("Speichern", Icons.Default.Save),
     "shapes" to Pair("Formen", Icons.Outlined.Interests),
     "signature" to Pair("Unterschrift", Icons.Default.Gesture),
+    "underline" to Pair("Unterstreichen", Icons.Default.FormatUnderlined),
     "undo" to Pair("Zurück", Icons.Default.Undo)
 )
 

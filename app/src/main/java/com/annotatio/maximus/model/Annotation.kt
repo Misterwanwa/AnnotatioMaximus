@@ -44,6 +44,24 @@ sealed class Annotation {
         val strokeWidth: Float
     ) : Annotation()
 
+    data class Underline(
+        override val pageIndex: Int,
+        override val id: String = UUID.randomUUID().toString(),
+        val x: Float,
+        val y: Float,
+        val width: Float,
+        val color: Color = Color.Black
+    ) : Annotation()
+
+    data class Comment(
+        override val pageIndex: Int,
+        override val id: String = UUID.randomUUID().toString(),
+        val x: Float,
+        val y: Float,
+        val text: String,
+        val color: Color = Color(0xFFFFC107)
+    ) : Annotation()
+
     data class Signature(
         override val pageIndex: Int,
         override val id: String = UUID.randomUUID().toString(),
