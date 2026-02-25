@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.StickyNote2
 import androidx.compose.material.icons.filled.SwapVert
@@ -78,6 +79,7 @@ private val BUTTON_ENTRIES = listOf(
     "smartgraphic" to Pair("Smarte Grafik", Icons.Default.BubbleChart),
     "strikethrough" to Pair("Durchstreichen", Icons.Default.FormatStrikethrough),
     "table" to Pair("Tabelle", Icons.Default.TableChart),
+    "textbox" to Pair("Textfeld", Icons.Default.TextFields),
     "translator" to Pair("Übersetzer", Icons.Default.GTranslate),
     "underline" to Pair("Unterstreichen", Icons.Default.FormatUnderlined),
     "undo" to Pair("Zurück", Icons.Default.Undo)

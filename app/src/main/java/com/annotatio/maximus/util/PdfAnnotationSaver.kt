@@ -73,6 +73,9 @@ object PdfAnnotationSaver {
                                 is Annotation.SmartGraphic -> {
                                     // TODO: Implement smart graphic drawing
                                 }
+                                is Annotation.TextBox -> {
+                                    // TODO: Implement rich text box drawing
+                                }
                             }
                         }
                     }

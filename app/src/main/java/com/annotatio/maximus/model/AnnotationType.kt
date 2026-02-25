@@ -7,6 +7,7 @@ enum class AnnotationType {
     STRIKETHROUGH,
     TABLE,
     TEXT_NOTE,
+    TEXT_BOX,
     COMMENT,
     IMAGE,
     LINK,

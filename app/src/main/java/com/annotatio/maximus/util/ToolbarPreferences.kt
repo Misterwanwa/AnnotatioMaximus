@@ -14,6 +14,7 @@ private val DEFAULT_VISIBILITY = mapOf(
     "strikethrough" to true,
     "table" to true,
     "note" to true,
+    "textbox" to true,
     "comment" to true,
     "eraser" to true,
     "shapes" to true,

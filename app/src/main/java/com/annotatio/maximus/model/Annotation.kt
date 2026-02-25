@@ -126,6 +126,27 @@ sealed class Annotation {
         val height: Float,
         val color: Color = Color.Black
     ) : Annotation()
+
+    /**
+     * A rich-text box placed on the page.
+     * x/y/width/height are in normalized (0..1) page coordinates.
+     */
+    data class TextBox(
+        override val pageIndex: Int,
+        override val id: String = UUID.randomUUID().toString(),
+        val x: Float,
+        val y: Float,
+        val width: Float,
+        val height: Float,
+        val text: String,
+        val fontSize: Float = 14f,          // sp
+        val fontFamily: TextBoxFont = TextBoxFont.DEFAULT,
+        val color: Color = Color.Black,
+        val isBold: Boolean = false,
+        val isItalic: Boolean = false,
+        val isUnderline: Boolean = false,
+        val isStrikethrough: Boolean = false
+    ) : Annotation()
 }
 
 enum class ShapeType {
@@ -138,4 +159,10 @@ enum class ShapeType {
 enum class SmartGraphicType {
     MIND_MAP,
     ORG_CHART
+}
+
+enum class TextBoxFont(val label: String) {
+    DEFAULT("Standard"),
+    SERIF("Serif"),
+    MONOSPACE("Monospace")
 }

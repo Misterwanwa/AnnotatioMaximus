@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.BubbleChart
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Draw
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.ImportExport
@@ -80,6 +81,7 @@ fun AnnotationToolbar(
     onOpenTranslator: () -> Unit = {},
     onOpenScanner: () -> Unit = {},
     onSmartGraphicSelected: (com.annotatio.maximus.model.SmartGraphicType) -> Unit = {},
+    onToolbarTextBoxSelected: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val show = { id: String -> toolbarVisibility[id] != false }
@@ -104,7 +106,7 @@ fun AnnotationToolbar(
                 Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
             }
 
-            if (show("pen") || show("marker") || show("underline") || show("strikethrough") || show("table") || show("note") || show("comment") || show("eraser") || show("shapes") || show("signature") || show("image") || show("link") || show("select") || show("lasso") || show("smartgraphic") || show("translator") || show("converter") || show("gemini") || show("scanner")) {
+            if (show("pen") || show("marker") || show("underline") || show("strikethrough") || show("table") || show("note") || show("textbox") || show("comment") || show("eraser") || show("shapes") || show("signature") || show("image") || show("link") || show("select") || show("lasso") || show("smartgraphic") || show("translator") || show("converter") || show("gemini") || show("scanner")) {
                 ToolbarDivider()
             }
 
@@ -193,6 +195,21 @@ fun AnnotationToolbar(
                         onToolSelected(
                             if (activeTool == AnnotationType.TEXT_NOTE) null
                             else AnnotationType.TEXT_NOTE
+                        )
+                    }
+                )
+            }
+
+            if (show("textbox")) {
+                ToolToggleButton(
+                    icon = Icons.Default.TextFields,
+                    label = "Textfeld",
+                    isActive = activeTool == AnnotationType.TEXT_BOX,
+                    enabled = hasDocument,
+                    onClick = {
+                        onToolSelected(
+                            if (activeTool == AnnotationType.TEXT_BOX) null
+                            else AnnotationType.TEXT_BOX
                         )
                     }
                 )

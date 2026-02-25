@@ -44,6 +44,7 @@ import com.annotatio.maximus.model.AnnotationType
 import com.annotatio.maximus.ui.components.AnnotationCanvas
 import com.annotatio.maximus.ui.components.ConverterDialog
 import com.annotatio.maximus.ui.components.ScannerDialog
+import com.annotatio.maximus.ui.components.TextBoxEditDialog
 import com.annotatio.maximus.ui.components.SmartGraphicPickerDialog
 import com.annotatio.maximus.ui.components.TranslatorDialog
 import com.annotatio.maximus.ui.components.loadTargetLanguage
@@ -169,6 +170,11 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
 
     // Scanner state
     var showScannerDialog by remember { mutableStateOf(false) }
+
+    // TextBox state
+    var showTextBoxDialog by remember { mutableStateOf(false) }
+    var textBoxPosition by remember { mutableStateOf(Pair(0.1f, 0.1f)) }
+    var editingTextBox by remember { mutableStateOf<Annotation.TextBox?>(null) }
 
     // File picker
     val openFileLauncher = rememberLauncherForActivityResult(
@@ -399,6 +405,30 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
         ScannerDialog(onDismiss = { showScannerDialog = false })
     }
 
+    // TextBox create/edit dialog
+    if (showTextBoxDialog) {
+        TextBoxEditDialog(
+            initial = editingTextBox,
+            pageIndex = currentPage,
+            posX = textBoxPosition.first,
+            posY = textBoxPosition.second,
+            onDismiss = {
+                showTextBoxDialog = false
+                editingTextBox = null
+            },
+            onConfirm = { textBox ->
+                val existing = editingTextBox
+                if (existing != null) {
+                    viewModel.updateAnnotation(textBox)
+                } else {
+                    viewModel.addAnnotation(textBox)
+                }
+                showTextBoxDialog = false
+                editingTextBox = null
+            }
+        )
+    }
+
     if (isLandscape) {
         // Landscape layout: Toolbar on the left, content on the right
         Row(modifier = Modifier.fillMaxSize()) {
@@ -492,6 +522,11 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                                 linkPosition = Pair(x, y)
                                 showLinkDialog = true
                             },
+                            onRequestTextBox = { x, y ->
+                                textBoxPosition = Pair(x, y)
+                                editingTextBox = null
+                                showTextBoxDialog = true
+                            },
                             pendingSmartGraphicType = pendingSmartGraphicType,
                             modifier = Modifier.fillMaxSize()
                         )
@@ -525,14 +560,19 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                             },
                             modifier = Modifier.fillMaxSize()
                         )
-                        // Kommentar-Tap im Landscape-Modus
+                        // Kommentar-Tap + TextBox-Doppeltipp im Landscape-Modus
                         AnnotationDisplayOverlay(
-                            annotations = currentPageAnnotations.filterIsInstance<Annotation.Comment>(),
+                            annotations = currentPageAnnotations.filter { it is Annotation.Comment || it is Annotation.TextBox },
                             pageInfo = pageInfo,
                             onCommentTapped = { comment ->
                                 editingComment = comment
                                 commentInput = comment.text
                                 showCommentDialog = true
+                            },
+                            onTextBoxDoubleTapped = { textBox ->
+                                editingTextBox = textBox
+                                textBoxPosition = Pair(textBox.x, textBox.y)
+                                showTextBoxDialog = true
                             },
                             modifier = Modifier.fillMaxSize()
                         )
@@ -651,6 +691,11 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                                 linkPosition = Pair(x, y)
                                 showLinkDialog = true
                             },
+                            onRequestTextBox = { x, y ->
+                                textBoxPosition = Pair(x, y)
+                                editingTextBox = null
+                                showTextBoxDialog = true
+                            },
                             pendingSmartGraphicType = pendingSmartGraphicType,
                             modifier = Modifier.fillMaxSize()
                         )
@@ -674,6 +719,11 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                                 editingComment = comment
                                 commentInput = comment.text
                                 showCommentDialog = true
+                            },
+                            onTextBoxDoubleTapped = { textBox ->
+                                editingTextBox = textBox
+                                textBoxPosition = Pair(textBox.x, textBox.y)
+                                showTextBoxDialog = true
                             },
                             modifier = Modifier.fillMaxSize()
                         )

@@ -50,6 +50,7 @@ import com.annotatio.maximus.model.DrawingPath
 import com.annotatio.maximus.model.PathPoint
 import com.annotatio.maximus.model.ShapeType
 import com.annotatio.maximus.model.SmartGraphicType
+import com.annotatio.maximus.model.TextBoxFont
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -72,6 +73,7 @@ fun AnnotationCanvas(
     onRequestTable: (Float, Float) -> Unit,
     onRequestImage: (Float, Float) -> Unit = {},
     onRequestLink: (Float, Float) -> Unit = {},
+    onRequestTextBox: (Float, Float) -> Unit = {},
     pendingSmartGraphicType: SmartGraphicType = SmartGraphicType.MIND_MAP,
     modifier: Modifier = Modifier
 ) {
@@ -325,6 +327,15 @@ fun AnnotationCanvas(
             }
         }
 
+        AnnotationType.TEXT_BOX -> {
+            Modifier.pointerInput(Unit) {
+                detectTapGestures { offset ->
+                    val normalized = screenToNormalized(offset, pageInfo)
+                    onRequestTextBox(normalized.x, normalized.y)
+                }
+            }
+        }
+
         AnnotationType.SELECT, AnnotationType.LASSO -> {
             // Handled by SelectLassoOverlay
             Modifier
@@ -434,6 +445,11 @@ fun AnnotationCanvas(
                             }
 
                             is Annotation.SmartGraphic -> {
+                                normalized.x in annotation.x..(annotation.x + annotation.width) &&
+                                        normalized.y in annotation.y..(annotation.y + annotation.height)
+                            }
+
+                            is Annotation.TextBox -> {
                                 normalized.x in annotation.x..(annotation.x + annotation.width) &&
                                         normalized.y in annotation.y..(annotation.y + annotation.height)
                             }
@@ -557,6 +573,7 @@ fun AnnotationDisplayOverlay(
     annotations: List<Annotation>,
     pageInfo: PdfPageInfo,
     onCommentTapped: ((Annotation.Comment) -> Unit)? = null,
+    onTextBoxDoubleTapped: ((Annotation.TextBox) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     if (annotations.isEmpty()) return
@@ -575,16 +592,31 @@ fun AnnotationDisplayOverlay(
         }
     }
 
-    val tapModifier = if (onCommentTapped != null) {
+    val hasCallbacks = onCommentTapped != null || onTextBoxDoubleTapped != null
+    val tapModifier = if (hasCallbacks) {
         Modifier.pointerInput(annotations, pageInfo) {
-            detectTapGestures { offset ->
-                val normalized = screenToNormalized(offset, pageInfo)
-                val threshold = 0.04f
-                val hit = annotations.filterIsInstance<Annotation.Comment>().findLast { c ->
-                    abs(c.x - normalized.x) < threshold && abs(c.y - normalized.y) < threshold
+            detectTapGestures(
+                onTap = { offset ->
+                    if (onCommentTapped != null) {
+                        val normalized = screenToNormalized(offset, pageInfo)
+                        val threshold = 0.04f
+                        val hit = annotations.filterIsInstance<Annotation.Comment>().findLast { c ->
+                            abs(c.x - normalized.x) < threshold && abs(c.y - normalized.y) < threshold
+                        }
+                        hit?.let { onCommentTapped(it) }
+                    }
+                },
+                onDoubleTap = { offset ->
+                    if (onTextBoxDoubleTapped != null) {
+                        val normalized = screenToNormalized(offset, pageInfo)
+                        val hit = annotations.filterIsInstance<Annotation.TextBox>().findLast { tb ->
+                            normalized.x in tb.x..(tb.x + tb.width) &&
+                                    normalized.y in tb.y..(tb.y + tb.height)
+                        }
+                        hit?.let { onTextBoxDoubleTapped(it) }
+                    }
                 }
-                hit?.let { onCommentTapped(it) }
-            }
+            )
         }
     } else Modifier
 
@@ -1140,7 +1172,52 @@ internal fun DrawScope.drawAnnotation(
         is Annotation.Signature -> {
             // TODO: Implement signature drawing from bitmap
         }
+
+        is Annotation.TextBox -> {
+            val tl = normalizedToScreen(PathPoint(annotation.x, annotation.y), pageInfo)
+            val textSize = annotation.fontSize * density
+            val paint = AndroidPaint().apply {
+                isAntiAlias = true
+                color = annotation.color.toArgb()
+                this.textSize = textSize
+                isFakeBoldText = annotation.isBold
+                isUnderlineText = annotation.isUnderline
+                isStrikeThruText = annotation.isStrikethrough
+                typeface = when (annotation.fontFamily) {
+                    TextBoxFont.SERIF -> if (annotation.isItalic) Typeface.create(Typeface.SERIF, Typeface.ITALIC) else Typeface.SERIF
+                    TextBoxFont.MONOSPACE -> if (annotation.isItalic) Typeface.create(Typeface.MONOSPACE, Typeface.ITALIC) else Typeface.MONOSPACE
+                    TextBoxFont.DEFAULT -> if (annotation.isItalic) Typeface.create(Typeface.DEFAULT, Typeface.ITALIC) else Typeface.DEFAULT
+                }
+            }
+            val lineHeight = textSize * 1.3f
+            val maxW = annotation.width * pageInfo.pageWidth
+            val lines = wrapText(annotation.text, paint, maxW)
+            var lineY = tl.y + textSize
+            for (line in lines) {
+                drawContext.canvas.nativeCanvas.drawText(line, tl.x, lineY, paint)
+                lineY += lineHeight
+            }
+        }
     }
+}
+
+/** Simple word-wrap: splits text into lines that fit within [maxWidth] pixels. */
+private fun wrapText(text: String, paint: AndroidPaint, maxWidth: Float): List<String> {
+    val words = text.split(" ")
+    val lines = mutableListOf<String>()
+    var current = StringBuilder()
+    for (word in words) {
+        val candidate = if (current.isEmpty()) word else "$current $word"
+        if (paint.measureText(candidate) <= maxWidth) {
+            current = StringBuilder(candidate)
+        } else {
+            if (current.isNotEmpty()) lines.add(current.toString())
+            current = StringBuilder(word)
+        }
+    }
+    if (current.isNotEmpty()) lines.add(current.toString())
+    // Also split on explicit newlines
+    return lines.flatMap { it.split("\n") }
 }
 
 private fun DrawScope.drawMindMap(
