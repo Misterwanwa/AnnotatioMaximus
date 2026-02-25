@@ -17,5 +17,6 @@ enum class AnnotationType {
     SQUARE,
     RECTANGLE,
     TRIANGLE,
-    SIGNATURE
+    SIGNATURE,
+    SMART_GRAPHIC
 }

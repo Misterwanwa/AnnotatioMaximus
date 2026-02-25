@@ -115,6 +115,17 @@ sealed class Annotation {
         val height: Float,
         val bitmapData: ByteArray
     ) : Annotation()
+
+    data class SmartGraphic(
+        override val pageIndex: Int,
+        override val id: String = UUID.randomUUID().toString(),
+        val type: SmartGraphicType,
+        val x: Float,
+        val y: Float,
+        val width: Float,
+        val height: Float,
+        val color: Color = Color.Black
+    ) : Annotation()
 }
 
 enum class ShapeType {
@@ -122,4 +133,9 @@ enum class ShapeType {
     SQUARE,
     RECTANGLE,
     TRIANGLE
+}
+
+enum class SmartGraphicType {
+    MIND_MAP,
+    ORG_CHART
 }

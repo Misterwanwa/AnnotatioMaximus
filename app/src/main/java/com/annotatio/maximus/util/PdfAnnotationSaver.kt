@@ -70,6 +70,9 @@ object PdfAnnotationSaver {
                                 is Annotation.Link -> {
                                     // TODO: Implement link annotation
                                 }
+                                is Annotation.SmartGraphic -> {
+                                    // TODO: Implement smart graphic drawing
+                                }
                             }
                         }
                     }

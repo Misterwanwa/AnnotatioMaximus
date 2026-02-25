@@ -283,6 +283,8 @@ private fun annotationContains(annotation: Annotation, norm: PathPoint, pageInfo
         is Annotation.Comment -> abs(annotation.x - norm.x) < threshold && abs(annotation.y - norm.y) < threshold
         is Annotation.Signature -> norm.x in annotation.x..(annotation.x + annotation.width) &&
                 norm.y in annotation.y..(annotation.y + annotation.height)
+        is Annotation.SmartGraphic -> norm.x in annotation.x..(annotation.x + annotation.width) &&
+                norm.y in annotation.y..(annotation.y + annotation.height)
     }
 }
 
@@ -306,6 +308,7 @@ private fun annotationCenterScreen(annotation: Annotation, pageInfo: PdfPageInfo
         is Annotation.Link -> normToScreen(PathPoint(annotation.x, annotation.y), pageInfo)
         is Annotation.Comment -> normToScreen(PathPoint(annotation.x, annotation.y), pageInfo)
         is Annotation.Signature -> normToScreen(PathPoint(annotation.x + annotation.width / 2, annotation.y + annotation.height / 2), pageInfo)
+        is Annotation.SmartGraphic -> normToScreen(PathPoint(annotation.x + annotation.width / 2, annotation.y + annotation.height / 2), pageInfo)
     }
 }
 
@@ -334,6 +337,7 @@ private fun annotationBoundsScreen(annotation: Annotation, pageInfo: PdfPageInfo
         is Annotation.Link -> { val c = n2s(annotation.x, annotation.y); Rect(c.x - pad, c.y - 16f - pad, c.x + 80f + pad, c.y + pad) }
         is Annotation.Comment -> { val c = n2s(annotation.x, annotation.y); Rect(c.x - 14f - pad, c.y - 14f - pad, c.x + 14f + pad, c.y + 14f + pad) }
         is Annotation.Signature -> { val tl = n2s(annotation.x, annotation.y); val br = n2s(annotation.x + annotation.width, annotation.y + annotation.height); Rect(tl.x - pad, tl.y - pad, br.x + pad, br.y + pad) }
+        is Annotation.SmartGraphic -> { val tl = n2s(annotation.x, annotation.y); val br = n2s(annotation.x + annotation.width, annotation.y + annotation.height); Rect(tl.x - pad, tl.y - pad, br.x + pad, br.y + pad) }
     }
 }
 
@@ -360,6 +364,7 @@ private fun moveAnnotation(annotation: Annotation, dxNorm: Float, dyNorm: Float)
     is Annotation.Link -> annotation.copy(x = annotation.x + dxNorm, y = annotation.y + dyNorm)
     is Annotation.Comment -> annotation.copy(x = annotation.x + dxNorm, y = annotation.y + dyNorm)
     is Annotation.Signature -> annotation.copy(x = annotation.x + dxNorm, y = annotation.y + dyNorm)
+    is Annotation.SmartGraphic -> annotation.copy(x = annotation.x + dxNorm, y = annotation.y + dyNorm)
 }
 
 /** Ray-casting algorithm: is point inside polygon? */

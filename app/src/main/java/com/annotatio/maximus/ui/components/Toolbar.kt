@@ -13,16 +13,20 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.BorderColor
+import androidx.compose.material.icons.filled.BubbleChart
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Gesture
+import androidx.compose.material.icons.filled.ImportExport
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.ModeComment
 import androidx.compose.material.icons.filled.FormatUnderlined
 import androidx.compose.material.icons.filled.FormatStrikethrough
+import androidx.compose.material.icons.filled.GTranslate
 import androidx.compose.material.icons.filled.Lasso
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.TableChart
@@ -71,6 +75,9 @@ fun AnnotationToolbar(
     onRedo: () -> Unit,
     onSave: () -> Unit,
     onOpenGeminiSketch: () -> Unit,
+    onOpenConverter: () -> Unit = {},
+    onOpenTranslator: () -> Unit = {},
+    onSmartGraphicSelected: (com.annotatio.maximus.model.SmartGraphicType) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val show = { id: String -> toolbarVisibility[id] != false }
@@ -95,7 +102,7 @@ fun AnnotationToolbar(
                 Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
             }
 
-            if (show("pen") || show("marker") || show("underline") || show("strikethrough") || show("table") || show("note") || show("comment") || show("eraser") || show("shapes") || show("signature") || show("image") || show("link") || show("select") || show("lasso") || show("gemini")) {
+            if (show("pen") || show("marker") || show("underline") || show("strikethrough") || show("table") || show("note") || show("comment") || show("eraser") || show("shapes") || show("signature") || show("image") || show("link") || show("select") || show("lasso") || show("smartgraphic") || show("translator") || show("converter") || show("gemini")) {
                 ToolbarDivider()
             }
 
@@ -327,6 +334,75 @@ fun AnnotationToolbar(
                         )
                     }
                 )
+            }
+
+            // Smarte Grafiken (Dropdown)
+            if (show("smartgraphic")) {
+                var showSmartMenu by remember { mutableStateOf(false) }
+                Box {
+                    ToolToggleButton(
+                        icon = Icons.Default.BubbleChart,
+                        label = "Smarte Grafik",
+                        isActive = activeTool == AnnotationType.SMART_GRAPHIC,
+                        enabled = hasDocument,
+                        onClick = { showSmartMenu = true }
+                    )
+                    DropdownMenu(
+                        expanded = showSmartMenu,
+                        onDismissRequest = { showSmartMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.BubbleChart, contentDescription = null,
+                                        modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("MindMap")
+                                }
+                            },
+                            onClick = {
+                                showSmartMenu = false
+                                onSmartGraphicSelected(com.annotatio.maximus.model.SmartGraphicType.MIND_MAP)
+                                onToolSelected(AnnotationType.SMART_GRAPHIC)
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.AccountTree, contentDescription = null,
+                                        modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Organigramm")
+                                }
+                            },
+                            onClick = {
+                                showSmartMenu = false
+                                onSmartGraphicSelected(com.annotatio.maximus.model.SmartGraphicType.ORG_CHART)
+                                onToolSelected(AnnotationType.SMART_GRAPHIC)
+                            }
+                        )
+                    }
+                }
+            }
+
+            // Übersetzer
+            if (show("translator")) {
+                IconButton(
+                    onClick = onOpenTranslator,
+                    enabled = hasDocument
+                ) {
+                    Icon(Icons.Default.GTranslate, contentDescription = "Übersetzer")
+                }
+            }
+
+            // Konverter
+            if (show("converter")) {
+                IconButton(
+                    onClick = onOpenConverter,
+                    enabled = hasDocument
+                ) {
+                    Icon(Icons.Default.ImportExport, contentDescription = "Konvertieren")
+                }
             }
 
             if (show("gemini")) {

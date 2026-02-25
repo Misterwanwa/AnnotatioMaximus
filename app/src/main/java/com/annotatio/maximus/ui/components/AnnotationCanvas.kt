@@ -49,6 +49,7 @@ import com.annotatio.maximus.model.AnnotationType
 import com.annotatio.maximus.model.DrawingPath
 import com.annotatio.maximus.model.PathPoint
 import com.annotatio.maximus.model.ShapeType
+import com.annotatio.maximus.model.SmartGraphicType
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -71,6 +72,7 @@ fun AnnotationCanvas(
     onRequestTable: (Float, Float) -> Unit,
     onRequestImage: (Float, Float) -> Unit = {},
     onRequestLink: (Float, Float) -> Unit = {},
+    pendingSmartGraphicType: SmartGraphicType = SmartGraphicType.MIND_MAP,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -328,6 +330,45 @@ fun AnnotationCanvas(
             Modifier
         }
 
+        AnnotationType.SMART_GRAPHIC -> {
+            Modifier.pointerInput(activeTool, penColor) {
+                detectDragGestures(
+                    onDragStart = { offset ->
+                        dragStart = offset
+                        dragCurrent = offset
+                    },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        dragCurrent = change.position
+                    },
+                    onDragEnd = {
+                        if (dragStart != null && dragCurrent != null) {
+                            val startNorm = screenToNormalized(dragStart!!, pageInfo)
+                            val endNorm = screenToNormalized(dragCurrent!!, pageInfo)
+                            val x = minOf(startNorm.x, endNorm.x)
+                            val y = minOf(startNorm.y, endNorm.y)
+                            val w = abs(endNorm.x - startNorm.x)
+                            val h = abs(endNorm.y - startNorm.y)
+                            if (w > 0.05f && h > 0.05f) {
+                                // pendingSmartGraphicType is set by PdfViewerScreen before activating tool
+                                onAddAnnotation(
+                                    Annotation.SmartGraphic(
+                                        pageIndex = currentPageIndex,
+                                        type = pendingSmartGraphicType,
+                                        x = x, y = y, width = w, height = h,
+                                        color = penColor
+                                    )
+                                )
+                            }
+                        }
+                        dragStart = null
+                        dragCurrent = null
+                    },
+                    onDragCancel = { dragStart = null; dragCurrent = null }
+                )
+            }
+        }
+
         AnnotationType.ERASER -> {
             Modifier.pointerInput(Unit) {
                 detectTapGestures { offset ->
@@ -390,6 +431,11 @@ fun AnnotationCanvas(
                             is Annotation.Link -> {
                                 abs(annotation.x - normalized.x) < threshold * 3 &&
                                         abs(annotation.y - normalized.y) < threshold * 2
+                            }
+
+                            is Annotation.SmartGraphic -> {
+                                normalized.x in annotation.x..(annotation.x + annotation.width) &&
+                                        normalized.y in annotation.y..(annotation.y + annotation.height)
                             }
                         }
                     }
@@ -484,6 +530,20 @@ fun AnnotationCanvas(
                         path = path,
                         color = previewColor,
                         style = Stroke(width = penStrokeWidth)
+                    )
+                }
+                AnnotationType.SMART_GRAPHIC -> {
+                    // Preview as dashed rectangle
+                    drawRect(
+                        color = previewColor,
+                        topLeft = Offset(left, top),
+                        size = Size(width, height),
+                        style = Stroke(
+                            width = penStrokeWidth,
+                            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+                                floatArrayOf(12f, 6f)
+                            )
+                        )
                     )
                 }
                 else -> {}
@@ -1064,10 +1124,102 @@ internal fun DrawScope.drawAnnotation(
             )
         }
 
+        is Annotation.SmartGraphic -> {
+            val tl = normalizedToScreen(PathPoint(annotation.x, annotation.y), pageInfo)
+            val br = normalizedToScreen(
+                PathPoint(annotation.x + annotation.width, annotation.y + annotation.height), pageInfo
+            )
+            val w = br.x - tl.x
+            val h = br.y - tl.y
+            when (annotation.type) {
+                SmartGraphicType.MIND_MAP -> drawMindMap(tl, w, h, annotation.color)
+                SmartGraphicType.ORG_CHART -> drawOrgChart(tl, w, h, annotation.color)
+            }
+        }
+
         is Annotation.Signature -> {
             // TODO: Implement signature drawing from bitmap
         }
     }
+}
+
+private fun DrawScope.drawMindMap(
+    topLeft: Offset,
+    w: Float,
+    h: Float,
+    color: Color
+) {
+    val cx = topLeft.x + w / 2f
+    val cy = topLeft.y + h / 2f
+    val nodeR = minOf(w, h) * 0.12f
+    val strokeW = 2f
+
+    // Center node
+    drawCircle(color = color.copy(alpha = 0.15f), radius = nodeR, center = Offset(cx, cy))
+    drawCircle(color = color, radius = nodeR, center = Offset(cx, cy), style = Stroke(width = strokeW))
+
+    // 5 branch nodes evenly placed
+    val branchR = nodeR * 0.7f
+    val armLength = minOf(w, h) * 0.30f
+    val angles = listOf(0f, 72f, 144f, 216f, 288f)
+    for (angleDeg in angles) {
+        val rad = Math.toRadians(angleDeg.toDouble()).toFloat()
+        val bx = cx + cos(rad) * armLength
+        val by = cy + sin(rad) * armLength
+        drawLine(color = color.copy(alpha = 0.7f), start = Offset(cx, cy), end = Offset(bx, by), strokeWidth = strokeW)
+        drawCircle(color = color.copy(alpha = 0.1f), radius = branchR, center = Offset(bx, by))
+        drawCircle(color = color, radius = branchR, center = Offset(bx, by), style = Stroke(width = strokeW))
+    }
+}
+
+private fun DrawScope.drawOrgChart(
+    topLeft: Offset,
+    w: Float,
+    h: Float,
+    color: Color
+) {
+    val strokeW = 2f
+    val boxW = w * 0.22f
+    val boxH = h * 0.16f
+
+    // Root box centered at top
+    val rootCx = topLeft.x + w / 2f
+    val rootCy = topLeft.y + boxH / 2f + h * 0.05f
+    drawOrgBox(Offset(rootCx - boxW / 2f, rootCy - boxH / 2f), boxW, boxH, color, strokeW)
+
+    // Second level: 3 boxes
+    val level2Y = topLeft.y + h * 0.45f
+    val level2Xs = listOf(topLeft.x + w * 0.12f, topLeft.x + w * 0.5f - boxW / 2f, topLeft.x + w * 0.88f - boxW)
+    for (lx in level2Xs) {
+        val nodeCx = lx + boxW / 2f
+        val nodeCy = level2Y + boxH / 2f
+        // Connector from root to this node
+        drawLine(
+            color = color.copy(alpha = 0.7f),
+            start = Offset(rootCx, rootCy + boxH / 2f),
+            end = Offset(nodeCx, nodeCy - boxH / 2f),
+            strokeWidth = strokeW
+        )
+        drawOrgBox(Offset(lx, level2Y), boxW, boxH, color, strokeW)
+    }
+
+    // Third level: one child under the middle second-level box
+    val midL2Cx = level2Xs[1] + boxW / 2f
+    val midL2BottomY = level2Y + boxH
+    val l3Y = topLeft.y + h * 0.78f
+    val l3Cx = midL2Cx
+    drawLine(
+        color = color.copy(alpha = 0.7f),
+        start = Offset(midL2Cx, midL2BottomY),
+        end = Offset(l3Cx, l3Y),
+        strokeWidth = strokeW
+    )
+    drawOrgBox(Offset(l3Cx - boxW / 2f, l3Y), boxW, boxH, color, strokeW)
+}
+
+private fun DrawScope.drawOrgBox(topLeft: Offset, w: Float, h: Float, color: Color, strokeW: Float) {
+    drawRect(color = color.copy(alpha = 0.08f), topLeft = topLeft, size = Size(w, h))
+    drawRect(color = color, topLeft = topLeft, size = Size(w, h), style = Stroke(width = strokeW))
 }
 
 private fun DrawScope.drawPathFromPoints(

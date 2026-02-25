@@ -10,14 +10,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.BorderColor
+import androidx.compose.material.icons.filled.BubbleChart
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Gesture
+import androidx.compose.material.icons.filled.GTranslate
+import androidx.compose.material.icons.filled.ImportExport
 import androidx.compose.material.icons.filled.Lasso
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.ModeComment
@@ -54,6 +58,7 @@ import androidx.compose.ui.unit.dp
  */
 private val BUTTON_ENTRIES = listOf(
     "comment" to Pair("Kommentar", Icons.Default.ModeComment),
+    "converter" to Pair("Konverter", Icons.Default.ImportExport),
     "eraser" to Pair("Radierer", Icons.Default.CleaningServices),
     "gemini" to Pair("KI-Bild", Icons.Default.SmartToy),
     "image" to Pair("Bild", Icons.Default.AddPhotoAlternate),
@@ -68,8 +73,10 @@ private val BUTTON_ENTRIES = listOf(
     "select" to Pair("Auswählen", Icons.Default.NearMe),
     "shapes" to Pair("Formen", Icons.Outlined.Interests),
     "signature" to Pair("Unterschrift", Icons.Default.Gesture),
+    "smartgraphic" to Pair("Smarte Grafik", Icons.Default.BubbleChart),
     "strikethrough" to Pair("Durchstreichen", Icons.Default.FormatStrikethrough),
     "table" to Pair("Tabelle", Icons.Default.TableChart),
+    "translator" to Pair("Übersetzer", Icons.Default.GTranslate),
     "underline" to Pair("Unterstreichen", Icons.Default.FormatUnderlined),
     "undo" to Pair("Zurück", Icons.Default.Undo)
 )
@@ -78,6 +85,8 @@ private val BUTTON_ENTRIES = listOf(
 fun SettingsDialog(
     toolbarVisibility: Map<String, Boolean>,
     onToolbarVisibilityChange: (Map<String, Boolean>) -> Unit,
+    translatorLanguageCode: String = "de",
+    onTranslatorLanguageChange: (String) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     var showButtonsSettings by remember { mutableStateOf(false) }
@@ -94,6 +103,30 @@ fun SettingsDialog(
             title = { Text("Einstellungen") },
             text = {
                 Column {
+                    // Translator language
+                    LanguagePickerRow(
+                        currentCode = translatorLanguageCode,
+                        onLanguageChanged = onTranslatorLanguageChange
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showButtonsSettings = true }
+                            .padding(vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Buttons anpassen",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = null
+                        )
+                    }
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()

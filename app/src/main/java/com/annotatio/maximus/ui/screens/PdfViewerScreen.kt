@@ -42,6 +42,11 @@ import com.annotatio.maximus.model.DrawingPath
 import com.annotatio.maximus.model.PathPoint
 import com.annotatio.maximus.model.AnnotationType
 import com.annotatio.maximus.ui.components.AnnotationCanvas
+import com.annotatio.maximus.ui.components.ConverterDialog
+import com.annotatio.maximus.ui.components.SmartGraphicPickerDialog
+import com.annotatio.maximus.ui.components.TranslatorDialog
+import com.annotatio.maximus.ui.components.loadTargetLanguage
+import com.annotatio.maximus.ui.components.saveTargetLanguage
 import com.annotatio.maximus.ui.components.AnnotationDisplayOverlay
 import com.annotatio.maximus.ui.components.AnnotationLayerOverlay
 import com.annotatio.maximus.ui.components.AnnotationToolbar
@@ -146,6 +151,20 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
     // Link dialog state
     var showLinkDialog by remember { mutableStateOf(false) }
     var linkPosition by remember { mutableStateOf(Pair(0f, 0f)) }
+
+    // Smart graphic state
+    var pendingSmartGraphicType by remember {
+        mutableStateOf(com.annotatio.maximus.model.SmartGraphicType.MIND_MAP)
+    }
+
+    // Converter dialog state
+    var showConverterDialog by remember { mutableStateOf(false) }
+
+    // Translator state
+    var showTranslatorDialog by remember { mutableStateOf(false) }
+    var translatorLanguageCode by remember(context) {
+        mutableStateOf(loadTargetLanguage(context))
+    }
 
     // File picker
     val openFileLauncher = rememberLauncherForActivityResult(
@@ -355,6 +374,22 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
         )
     }
 
+    // Converter dialog
+    if (showConverterDialog && pdfUri != null) {
+        ConverterDialog(
+            pdfUri = pdfUri!!,
+            onDismiss = { showConverterDialog = false }
+        )
+    }
+
+    // Translator dialog
+    if (showTranslatorDialog) {
+        TranslatorDialog(
+            targetLangCode = translatorLanguageCode,
+            onDismiss = { showTranslatorDialog = false }
+        )
+    }
+
     if (isLandscape) {
         // Landscape layout: Toolbar on the left, content on the right
         Row(modifier = Modifier.fillMaxSize()) {
@@ -378,7 +413,10 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                     onUndo = viewModel::undo,
                     onRedo = viewModel::redo,
                     onSave = { saveFileLauncher.launch("annotated_document.pdf") },
-                    onOpenGeminiSketch = { showGeminiSketch = true }
+                    onOpenGeminiSketch = { showGeminiSketch = true },
+                    onOpenConverter = { showConverterDialog = true },
+                    onOpenTranslator = { showTranslatorDialog = true },
+                    onSmartGraphicSelected = { type -> pendingSmartGraphicType = type }
                 )
                 ToolOptionsPanel(
                     activeTool = activeTool,
@@ -444,6 +482,7 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                                 linkPosition = Pair(x, y)
                                 showLinkDialog = true
                             },
+                            pendingSmartGraphicType = pendingSmartGraphicType,
                             modifier = Modifier.fillMaxSize()
                         )
                     } else if (activeTool == AnnotationType.SELECT || activeTool == AnnotationType.LASSO) {
@@ -532,7 +571,10 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                         onUndo = viewModel::undo,
                         onRedo = viewModel::redo,
                         onSave = { saveFileLauncher.launch("annotated_document.pdf") },
-                        onOpenGeminiSketch = { showGeminiSketch = true }
+                        onOpenGeminiSketch = { showGeminiSketch = true },
+                        onOpenConverter = { showConverterDialog = true },
+                        onOpenTranslator = { showTranslatorDialog = true },
+                        onSmartGraphicSelected = { type -> pendingSmartGraphicType = type }
                     )
                     ToolOptionsPanel(
                         activeTool = activeTool,
@@ -599,6 +641,7 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                                 linkPosition = Pair(x, y)
                                 showLinkDialog = true
                             },
+                            pendingSmartGraphicType = pendingSmartGraphicType,
                             modifier = Modifier.fillMaxSize()
                         )
                     } else if (activeTool == AnnotationType.SELECT || activeTool == AnnotationType.LASSO) {
@@ -698,6 +741,11 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
             onToolbarVisibilityChange = { newMap ->
                 toolbarVisibility = newMap
                 saveToolbarVisibility(context, newMap)
+            },
+            translatorLanguageCode = translatorLanguageCode,
+            onTranslatorLanguageChange = { code ->
+                translatorLanguageCode = code
+                saveTargetLanguage(context, code)
             },
             onDismiss = { showSettings = false }
         )
