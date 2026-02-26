@@ -3,6 +3,9 @@ package com.annotatio.maximus.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Paint
+import androidx.core.content.FileProvider
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -25,6 +28,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,9 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.content.FileProvider
-import android.graphics.Bitmap
-import android.graphics.Paint
+import kotlinx.coroutines.launch
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.toArgb
 import com.annotatio.maximus.model.Annotation
@@ -42,6 +44,8 @@ import com.annotatio.maximus.model.DrawingPath
 import com.annotatio.maximus.model.PathPoint
 import com.annotatio.maximus.model.AnnotationType
 import com.annotatio.maximus.ui.components.AnnotationCanvas
+import com.annotatio.maximus.ui.components.AnnotationToolbar
+import com.annotatio.maximus.ui.components.GeminiSketchDialog
 import com.annotatio.maximus.ui.components.ConverterDialog
 import com.annotatio.maximus.ui.components.ScannerDialog
 import com.annotatio.maximus.ui.components.TextBoxEditDialog
@@ -51,9 +55,15 @@ import com.annotatio.maximus.ui.components.loadTargetLanguage
 import com.annotatio.maximus.ui.components.saveTargetLanguage
 import com.annotatio.maximus.ui.components.AnnotationDisplayOverlay
 import com.annotatio.maximus.ui.components.AnnotationLayerOverlay
-import com.annotatio.maximus.ui.components.AnnotationToolbar
-import com.annotatio.maximus.ui.components.GeminiSketchDialog
+import com.annotatio.maximus.ui.components.BookmarkPanel
+import com.annotatio.maximus.ui.components.BugReportDialog
+import com.annotatio.maximus.ui.components.CloudStorageDialog
+import com.annotatio.maximus.ui.components.CreatePdfDialog
 import com.annotatio.maximus.ui.components.LinkDialog
+import com.annotatio.maximus.ui.components.PasswordDialog
+import com.annotatio.maximus.ui.components.SearchDialog
+import com.annotatio.maximus.ui.components.TtsDialog
+import com.annotatio.maximus.ui.components.WifiShareDialog
 import com.annotatio.maximus.ui.components.SelectLassoOverlay
 import com.annotatio.maximus.ui.components.SettingsDialog
 import com.annotatio.maximus.ui.components.SignatureDialog
@@ -62,6 +72,7 @@ import com.annotatio.maximus.ui.components.TablePickerDialog
 import com.annotatio.maximus.ui.components.PdfPageInfo
 import com.annotatio.maximus.ui.components.PdfViewer
 import com.annotatio.maximus.ui.components.ToolOptionsPanel
+import com.annotatio.maximus.util.GitHubApi
 import com.annotatio.maximus.util.loadToolbarVisibility
 import com.annotatio.maximus.util.saveToolbarVisibility
 import com.annotatio.maximus.viewmodel.PdfViewModel
@@ -73,7 +84,7 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-
+    val coroutineScope = rememberCoroutineScope()
     // Collect all state
     val pdfUri by viewModel.pdfUri.collectAsState()
     val activeTool by viewModel.activeTool.collectAsState()
@@ -85,6 +96,8 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
     val canRedo by viewModel.canRedo.collectAsState()
     val isSaving by viewModel.isSaving.collectAsState()
     val saveError by viewModel.saveError.collectAsState()
+    val bookmarks by viewModel.bookmarks.collectAsState()
+    val pageCount by viewModel.pageCount.collectAsState()
 
     // Gemini sketch dialog state
     var showGeminiSketch by remember { mutableStateOf(false) }
@@ -101,6 +114,8 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
         mutableStateOf(loadToolbarVisibility(context))
     }
     var showSettings by remember { mutableStateOf(false) }
+    var showBugReportDialog by remember { mutableStateOf(false) }
+    var isSubmittingBugReport by remember { mutableStateOf(false) }
 
     // Ausgewählte Ebene (Stroke) auf der aktuellen Seite
     var selectedAnnotationId by remember(currentPage) { mutableStateOf<String?>(null) }
@@ -176,7 +191,16 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
     var textBoxPosition by remember { mutableStateOf(Pair(0.1f, 0.1f)) }
     var editingTextBox by remember { mutableStateOf<Annotation.TextBox?>(null) }
 
-    // File picker
+    // New feature dialog states
+    var showBookmarkPanel by remember { mutableStateOf(false) }
+    var showTtsDialog by remember { mutableStateOf(false) }
+    var showWifiShareDialog by remember { mutableStateOf(false) }
+    var showCloudDialog by remember { mutableStateOf(false) }
+    var showCreatePdfDialog by remember { mutableStateOf(false) }
+    var showPasswordDialog by remember { mutableStateOf(false) }
+    var showSearchDialog by remember { mutableStateOf(false) }
+
+    // File picker (local storage and cloud providers)
     val openFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -184,7 +208,7 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
             context.contentResolver.takePersistableUriPermission(
                 it, Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
-            viewModel.openPdf(it)
+            viewModel.openPdf(it, context)
         }
     }
 
@@ -429,6 +453,83 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
         )
     }
 
+    // ── New feature dialogs ──────────────────────────────────────────────────
+
+    // Bookmarks panel
+    if (showBookmarkPanel) {
+        BookmarkPanel(
+            bookmarks = bookmarks,
+            currentPage = currentPage,
+            onNavigate = { page -> viewModel.navigateToPage(page) },
+            onAdd = { bm -> viewModel.addBookmark(context, bm) },
+            onDelete = { bm -> viewModel.removeBookmark(context, bm) },
+            onRename = { bm, label -> viewModel.renameBookmark(context, bm, label) },
+            onDismiss = { showBookmarkPanel = false }
+        )
+    }
+
+    // TTS dialog
+    if (showTtsDialog) {
+        val pdfFile = pdfUri?.let { uri ->
+            try {
+                val tmp = File(context.cacheDir, "tts_tmp.pdf")
+                context.contentResolver.openInputStream(uri)?.use { it.copyTo(tmp.outputStream()) }
+                tmp
+            } catch (_: Exception) { null }
+        }
+        TtsDialog(
+            pdfFile = pdfFile,
+            currentPage = currentPage,
+            pageCount = pageCount,
+            onDismiss = { showTtsDialog = false }
+        )
+    }
+
+    // WiFi share dialog
+    if (showWifiShareDialog) {
+        WifiShareDialog(
+            pdfUri = pdfUri,
+            onDismiss = { showWifiShareDialog = false }
+        )
+    }
+
+    // Cloud storage dialog
+    if (showCloudDialog) {
+        CloudStorageDialog(
+            currentPdfUri = pdfUri,
+            onOpenFromCloud = { openFileLauncher.launch(arrayOf("application/pdf")) },
+            onDismiss = { showCloudDialog = false }
+        )
+    }
+
+    // Create PDF dialog
+    if (showCreatePdfDialog) {
+        CreatePdfDialog(
+            onDismiss = { showCreatePdfDialog = false },
+            onPdfCreated = { uri ->
+                viewModel.openPdf(uri, context)
+                showCreatePdfDialog = false
+            }
+        )
+    }
+
+    // Password protection dialog
+    if (showPasswordDialog) {
+        PasswordDialog(
+            pdfUri = pdfUri,
+            onDismiss = { showPasswordDialog = false }
+        )
+    }
+
+    // Search dialog
+    if (showSearchDialog) {
+        SearchDialog(
+            pdfUri = pdfUri,
+            onNavigateToPage = { page -> viewModel.navigateToPage(page) },
+            onDismiss = { showSearchDialog = false }
+        )
+    }
+
     if (isLandscape) {
         // Landscape layout: Toolbar on the left, content on the right
         Row(modifier = Modifier.fillMaxSize()) {
@@ -448,6 +549,8 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                     toolbarVisibility = toolbarVisibility,
                     onOpenFile = { openFileLauncher.launch(arrayOf("application/pdf")) },
                     onSettingsClick = { showSettings = true },
+                    onBugReportClick = { showBugReportDialog = true },
+                    onBookmarksClick = { showBookmarkPanel = true },
                     onToolSelected = viewModel::selectTool,
                     onUndo = viewModel::undo,
                     onRedo = viewModel::redo,
@@ -456,6 +559,12 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                     onOpenConverter = { showConverterDialog = true },
                     onOpenTranslator = { showTranslatorDialog = true },
                     onOpenScanner = { showScannerDialog = true },
+                    onOpenTts = { showTtsDialog = true },
+                    onOpenWifiShare = { showWifiShareDialog = true },
+                    onOpenCloud = { showCloudDialog = true },
+                    onOpenCreatePdf = { showCreatePdfDialog = true },
+                    onOpenPassword = { showPasswordDialog = true },
+                    onOpenSearch = { showSearchDialog = true },
                     onSmartGraphicSelected = { type -> pendingSmartGraphicType = type }
                 )
                 ToolOptionsPanel(
@@ -617,6 +726,8 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                         toolbarVisibility = toolbarVisibility,
                         onOpenFile = { openFileLauncher.launch(arrayOf("application/pdf")) },
                         onSettingsClick = { showSettings = true },
+                        onBugReportClick = { showBugReportDialog = true },
+                        onBookmarksClick = { showBookmarkPanel = true },
                         onToolSelected = viewModel::selectTool,
                         onUndo = viewModel::undo,
                         onRedo = viewModel::redo,
@@ -624,6 +735,13 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                         onOpenGeminiSketch = { showGeminiSketch = true },
                         onOpenConverter = { showConverterDialog = true },
                         onOpenTranslator = { showTranslatorDialog = true },
+                        onOpenScanner = { showScannerDialog = true },
+                        onOpenTts = { showTtsDialog = true },
+                        onOpenWifiShare = { showWifiShareDialog = true },
+                        onOpenCloud = { showCloudDialog = true },
+                        onOpenCreatePdf = { showCreatePdfDialog = true },
+                        onOpenPassword = { showPasswordDialog = true },
+                        onOpenSearch = { showSearchDialog = true },
                         onSmartGraphicSelected = { type -> pendingSmartGraphicType = type }
                     )
                     ToolOptionsPanel(
@@ -818,6 +936,21 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                 showSignatureDialog = false
             },
             onDismiss = { showSignatureDialog = false }
+        )
+    }
+
+    if (showBugReportDialog) {
+        BugReportDialog(
+            onSubmit = { description ->
+                coroutineScope.launch {
+                    isSubmittingBugReport = true
+                    val result = GitHubApi.submitBugReport(description)
+                    // TODO: Show result to user
+                    isSubmittingBugReport = false
+                }
+                showBugReportDialog = false
+            },
+            onDismiss = { showBugReportDialog = false }
         )
     }
 }

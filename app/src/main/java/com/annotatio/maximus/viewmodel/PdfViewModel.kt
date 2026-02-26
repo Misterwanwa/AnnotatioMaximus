@@ -7,6 +7,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.annotatio.maximus.model.Annotation
 import com.annotatio.maximus.model.AnnotationType
+import com.annotatio.maximus.ui.components.Bookmark
+import com.annotatio.maximus.ui.components.loadBookmarks
+import com.annotatio.maximus.ui.components.saveBookmarks
 import com.annotatio.maximus.util.PdfAnnotationSaver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,6 +46,10 @@ class PdfViewModel : ViewModel() {
     private val _annotations = MutableStateFlow<Map<Int, List<Annotation>>>(emptyMap())
     val annotations: StateFlow<Map<Int, List<Annotation>>> = _annotations.asStateFlow()
 
+    // Bookmarks
+    private val _bookmarks = MutableStateFlow<List<Bookmark>>(emptyList())
+    val bookmarks: StateFlow<List<Bookmark>> = _bookmarks.asStateFlow()
+
     // Undo / Redo
     private val undoStack = mutableListOf<UndoAction>()
     private val redoStack = mutableListOf<UndoAction>()
@@ -62,12 +69,13 @@ class PdfViewModel : ViewModel() {
 
     fun clearSaveError() { _saveError.value = null }
 
-    fun openPdf(uri: Uri) {
+    fun openPdf(uri: Uri, context: Context) {
         _pdfUri.value = uri
         _annotations.value = emptyMap()
         undoStack.clear()
         redoStack.clear()
         updateUndoRedoState()
+        loadBookmarks(context, uri.toString())
     }
 
     fun openSamplePdf(context: Context) {
@@ -81,7 +89,7 @@ class PdfViewModel : ViewModel() {
             }
             val uri = Uri.fromFile(file)
             launch(Dispatchers.Main) {
-                openPdf(uri)
+                openPdf(uri, context)
             }
         }
     }
@@ -90,6 +98,42 @@ class PdfViewModel : ViewModel() {
         _currentPage.value = page
         _pageCount.value = count
     }
+
+    fun navigateToPage(page: Int) {
+        _currentPage.value = page
+    }
+
+    //region Bookmarks
+    private fun loadBookmarks(context: Context, pdfUriString: String) {
+        _bookmarks.value = com.annotatio.maximus.ui.components.loadBookmarks(context, pdfUriString)
+    }
+
+    fun addBookmark(context: Context, bookmark: Bookmark) {
+        val updatedBookmarks = (_bookmarks.value + bookmark).sortedBy { it.pageIndex }
+        _bookmarks.value = updatedBookmarks
+        _pdfUri.value?.toString()?.let {
+            saveBookmarks(context, it, updatedBookmarks)
+        }
+    }
+
+    fun removeBookmark(context: Context, bookmark: Bookmark) {
+        val updatedBookmarks = _bookmarks.value.filter { it != bookmark }
+        _bookmarks.value = updatedBookmarks
+        _pdfUri.value?.toString()?.let {
+            saveBookmarks(context, it, updatedBookmarks)
+        }
+    }
+
+    fun renameBookmark(context: Context, bookmark: Bookmark, newLabel: String) {
+        val updatedBookmarks = _bookmarks.value.map {
+            if (it == bookmark) it.copy(label = newLabel) else it
+        }
+        _bookmarks.value = updatedBookmarks
+        _pdfUri.value?.toString()?.let {
+            saveBookmarks(context, it, updatedBookmarks)
+        }
+    }
+    //endregion
 
     fun selectTool(tool: AnnotationType?) {
         _activeTool.value = tool

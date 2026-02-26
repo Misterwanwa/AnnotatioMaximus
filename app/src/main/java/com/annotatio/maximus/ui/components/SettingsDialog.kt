@@ -31,9 +31,15 @@ import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.DocumentScanner
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.NoteAdd
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.StickyNote2
 import androidx.compose.material.icons.filled.SwapVert
@@ -59,8 +65,10 @@ import androidx.compose.ui.unit.dp
  * Einträge für die Button-Sichtbarkeit, alphabetisch nach deutschem Label sortiert.
  */
 private val BUTTON_ENTRIES = listOf(
+    "cloud" to Pair("Cloud-Speicher", Icons.Default.Cloud),
     "comment" to Pair("Kommentar", Icons.Default.ModeComment),
     "converter" to Pair("Konverter", Icons.Default.ImportExport),
+    "createpdf" to Pair("PDF erstellen", Icons.Default.NoteAdd),
     "eraser" to Pair("Radierer", Icons.Default.CleaningServices),
     "gemini" to Pair("KI-Bild", Icons.Default.SmartToy),
     "image" to Pair("Bild", Icons.Default.AddPhotoAlternate),
@@ -69,10 +77,12 @@ private val BUTTON_ENTRIES = listOf(
     "marker" to Pair("Marker", Icons.Default.BorderColor),
     "note" to Pair("Notiz", Icons.Default.StickyNote2),
     "open" to Pair("Ordner", Icons.Default.FolderOpen),
+    "password" to Pair("Passwortschutz", Icons.Default.Lock),
     "pen" to Pair("Stift", Icons.Default.Draw),
     "redo" to Pair("Vorwärts", Icons.Default.Redo),
     "save" to Pair("Speichern", Icons.Default.Save),
     "scanner" to Pair("Scanner", Icons.Default.DocumentScanner),
+    "search" to Pair("Suchen", Icons.Default.Search),
     "select" to Pair("Auswählen", Icons.Default.NearMe),
     "shapes" to Pair("Formen", Icons.Outlined.Interests),
     "signature" to Pair("Unterschrift", Icons.Default.Gesture),
@@ -81,8 +91,10 @@ private val BUTTON_ENTRIES = listOf(
     "table" to Pair("Tabelle", Icons.Default.TableChart),
     "textbox" to Pair("Textfeld", Icons.Default.TextFields),
     "translator" to Pair("Übersetzer", Icons.Default.GTranslate),
+    "tts" to Pair("Vorlesen", Icons.Default.RecordVoiceOver),
     "underline" to Pair("Unterstreichen", Icons.Default.FormatUnderlined),
-    "undo" to Pair("Zurück", Icons.Default.Undo)
+    "undo" to Pair("Zurück", Icons.Default.Undo),
+    "wifi" to Pair("WLAN-Freigabe", Icons.Default.Wifi)
 )
 
 @Composable

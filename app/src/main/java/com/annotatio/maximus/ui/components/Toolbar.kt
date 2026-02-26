@@ -37,7 +37,15 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.StickyNote2
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.NoteAdd
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.outlined.Interests
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -72,6 +80,8 @@ fun AnnotationToolbar(
     toolbarVisibility: Map<String, Boolean>,
     onOpenFile: () -> Unit,
     onSettingsClick: () -> Unit,
+    onBugReportClick: () -> Unit,
+    onBookmarksClick: () -> Unit,
     onToolSelected: (AnnotationType?) -> Unit,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
@@ -80,6 +90,12 @@ fun AnnotationToolbar(
     onOpenConverter: () -> Unit = {},
     onOpenTranslator: () -> Unit = {},
     onOpenScanner: () -> Unit = {},
+    onOpenTts: () -> Unit = {},
+    onOpenWifiShare: () -> Unit = {},
+    onOpenCloud: () -> Unit = {},
+    onOpenCreatePdf: () -> Unit = {},
+    onOpenPassword: () -> Unit = {},
+    onOpenSearch: () -> Unit = {},
     onSmartGraphicSelected: (com.annotatio.maximus.model.SmartGraphicType) -> Unit = {},
     onToolbarTextBoxSelected: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -101,12 +117,19 @@ fun AnnotationToolbar(
                 }
             }
 
+            // Lesezeichen
+            if (show("bookmarks")) {
+                IconButton(onClick = onBookmarksClick, enabled = hasDocument) {
+                    Icon(Icons.Default.Bookmark, contentDescription = "Lesezeichen")
+                }
+            }
+
             // Einstellungen
             IconButton(onClick = onSettingsClick) {
                 Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
             }
 
-            if (show("pen") || show("marker") || show("underline") || show("strikethrough") || show("table") || show("note") || show("textbox") || show("comment") || show("eraser") || show("shapes") || show("signature") || show("image") || show("link") || show("select") || show("lasso") || show("smartgraphic") || show("translator") || show("converter") || show("gemini") || show("scanner")) {
+            if (show("pen") || show("marker") || show("underline") || show("strikethrough") || show("table") || show("note") || show("textbox") || show("comment") || show("eraser") || show("shapes") || show("signature") || show("image") || show("link") || show("select") || show("lasso") || show("smartgraphic") || show("translator") || show("converter") || show("gemini") || show("scanner") || show("tts") || show("wifi") || show("cloud") || show("createpdf") || show("password") || show("search")) {
                 ToolbarDivider()
             }
 
@@ -440,6 +463,48 @@ fun AnnotationToolbar(
                 }
             }
 
+            // Suche
+            if (show("search")) {
+                IconButton(onClick = onOpenSearch, enabled = hasDocument) {
+                    Icon(Icons.Default.Search, contentDescription = "Suchen")
+                }
+            }
+
+            // TTS – Vorlesen
+            if (show("tts")) {
+                IconButton(onClick = onOpenTts, enabled = hasDocument) {
+                    Icon(Icons.Default.RecordVoiceOver, contentDescription = "Vorlesen")
+                }
+            }
+
+            // WLAN-Freigabe
+            if (show("wifi")) {
+                IconButton(onClick = onOpenWifiShare, enabled = hasDocument) {
+                    Icon(Icons.Default.Wifi, contentDescription = "WLAN-Freigabe")
+                }
+            }
+
+            // Cloud-Speicher
+            if (show("cloud")) {
+                IconButton(onClick = onOpenCloud) {
+                    Icon(Icons.Default.Cloud, contentDescription = "Cloud-Speicher")
+                }
+            }
+
+            // PDF erstellen
+            if (show("createpdf")) {
+                IconButton(onClick = onOpenCreatePdf) {
+                    Icon(Icons.Default.NoteAdd, contentDescription = "PDF erstellen")
+                }
+            }
+
+            // Passwortschutz
+            if (show("password")) {
+                IconButton(onClick = onOpenPassword, enabled = hasDocument) {
+                    Icon(Icons.Default.Lock, contentDescription = "Passwortschutz")
+                }
+            }
+
             if (show("undo") || show("redo")) {
                 ToolbarDivider()
             }
@@ -468,7 +533,10 @@ fun AnnotationToolbar(
             if (show("save")) {
                 ToolbarDivider()
             }
-
+            // Bug Report
+            IconButton(onClick = onBugReportClick) {
+                Icon(Icons.Default.BugReport, contentDescription = "Bug melden")
+            }
             if (show("save")) {
                 IconButton(onClick = onSave, enabled = hasDocument) {
                     Icon(
