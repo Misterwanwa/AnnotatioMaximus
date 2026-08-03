@@ -361,11 +361,21 @@ private fun CropOverlay(
                             val threshold = 48f * density
                             val cList = currentCorners
                             val activeSize = size
+                            
+                            val imgW = bitmap.width
+                            val imgH = bitmap.height
+                            val scaleX = activeSize.width / imgW
+                            val scaleY = activeSize.height / imgH
+                            val scale = min(scaleX, scaleY)
+                            val offX = (activeSize.width - imgW * scale) / 2f
+                            val offY = (activeSize.height - imgH * scale) / 2f
+                            
                             var minDistance = Float.MAX_VALUE
                             var bestIndex = -1
                             cList.forEachIndexed { i, c ->
-                                val cx = c.x * activeSize.width
-                                val cy = c.y * activeSize.height
+                                // Map relative bitmap coordinate to screen coordinate
+                                val cx = offX + c.x * imgW * scale
+                                val cy = offY + c.y * imgH * scale
                                 val dx = touchOffset.x - cx
                                 val dy = touchOffset.y - cy
                                 val dist = sqrt(dx * dx + dy * dy)
@@ -381,8 +391,18 @@ private fun CropOverlay(
                             val idx = draggingIndex
                             if (idx in 0..3) {
                                 val activeSize = size
-                                val nx = (change.position.x / activeSize.width).coerceIn(0f, 1f)
-                                val ny = (change.position.y / activeSize.height).coerceIn(0f, 1f)
+                                val imgW = bitmap.width
+                                val imgH = bitmap.height
+                                val scaleX = activeSize.width / imgW
+                                val scaleY = activeSize.height / imgH
+                                val scale = min(scaleX, scaleY)
+                                val offX = (activeSize.width - imgW * scale) / 2f
+                                val offY = (activeSize.height - imgH * scale) / 2f
+                                
+                                // Map screen coordinate back to relative bitmap coordinate
+                                val nx = ((change.position.x - offX) / (imgW * scale)).coerceIn(0f, 1f)
+                                val ny = ((change.position.y - offY) / (imgH * scale)).coerceIn(0f, 1f)
+                                
                                 val updated = currentCorners.toMutableList()
                                 updated[idx] = Offset(nx, ny)
                                 currentOnCornersChanged(updated)
@@ -410,13 +430,20 @@ private fun CropOverlay(
                 )
             )
 
-            drawCropQuad(corners = corners, activeDraggingIndex = draggingIndex)
+            drawCropQuad(corners = corners, activeDraggingIndex = draggingIndex, bitmap = bitmap)
         }
     }
 }
 
-private fun DrawScope.drawCropQuad(corners: List<Offset>, activeDraggingIndex: Int = -1) {
-    val pts = corners.map { Offset(it.x * size.width, it.y * size.height) }
+private fun DrawScope.drawCropQuad(corners: List<Offset>, activeDraggingIndex: Int = -1, bitmap: Bitmap) {
+    val scaleX = size.width / bitmap.width
+    val scaleY = size.height / bitmap.height
+    val scale = min(scaleX, scaleY)
+    val offX = (size.width - bitmap.width * scale) / 2f
+    val offY = (size.height - bitmap.height * scale) / 2f
+
+    // Map corners from relative bitmap coords to screen coordinates
+    val pts = corners.map { Offset(offX + it.x * bitmap.width * scale, offY + it.y * bitmap.height * scale) }
 
     val edgePaint = android.graphics.Paint().apply {
         color = Color.CYAN
