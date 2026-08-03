@@ -299,33 +299,46 @@ private fun CropOverlay(
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current.density
-    var draggingIndex by remember { mutableStateOf(-1) }
+    var draggingIndex by remember { androidx.compose.runtime.mutableIntStateOf(-1) }
+
+    val currentCorners by androidx.compose.runtime.rememberUpdatedState(corners)
+    val currentOnCornersChanged by androidx.compose.runtime.rememberUpdatedState(onCornersChanged)
 
     Box(modifier = modifier) {
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(corners, density) {
+                .pointerInput(Unit) {
                     detectDragGestures(
                         onDragStart = { touchOffset ->
-                            // Find the nearest corner handle (within 40 dp = 40 * density px)
-                            val threshold = 40f * density
-                            draggingIndex = corners.indexOfFirst { c ->
-                                val cx = c.x * size.width
-                                val cy = c.y * size.height
+                            val threshold = 48f * density
+                            val cList = currentCorners
+                            val activeSize = size
+                            var minDistance = Float.MAX_VALUE
+                            var bestIndex = -1
+                            cList.forEachIndexed { i, c ->
+                                val cx = c.x * activeSize.width
+                                val cy = c.y * activeSize.height
                                 val dx = touchOffset.x - cx
                                 val dy = touchOffset.y - cy
-                                sqrt(dx * dx + dy * dy) < threshold
+                                val dist = sqrt(dx * dx + dy * dy)
+                                if (dist < threshold && dist < minDistance) {
+                                    minDistance = dist
+                                    bestIndex = i
+                                }
                             }
+                            draggingIndex = bestIndex
                         },
                         onDrag = { change, _ ->
                             change.consume()
-                            if (draggingIndex >= 0) {
-                                val nx = (change.position.x / size.width).coerceIn(0f, 1f)
-                                val ny = (change.position.y / size.height).coerceIn(0f, 1f)
-                                val updated = corners.toMutableList()
-                                updated[draggingIndex] = Offset(nx, ny)
-                                onCornersChanged(updated)
+                            val idx = draggingIndex
+                            if (idx in 0..3) {
+                                val activeSize = size
+                                val nx = (change.position.x / activeSize.width).coerceIn(0f, 1f)
+                                val ny = (change.position.y / activeSize.height).coerceIn(0f, 1f)
+                                val updated = currentCorners.toMutableList()
+                                updated[idx] = Offset(nx, ny)
+                                currentOnCornersChanged(updated)
                             }
                         },
                         onDragEnd = { draggingIndex = -1 },
@@ -350,22 +363,35 @@ private fun CropOverlay(
                 )
             )
 
-            drawCropQuad(corners)
+            drawCropQuad(corners = corners, activeDraggingIndex = draggingIndex)
         }
     }
 }
 
-private fun DrawScope.drawCropQuad(corners: List<Offset>) {
+private fun DrawScope.drawCropQuad(corners: List<Offset>, activeDraggingIndex: Int = -1) {
     val pts = corners.map { Offset(it.x * size.width, it.y * size.height) }
 
     val edgePaint = android.graphics.Paint().apply {
         color = Color.CYAN
-        strokeWidth = 3f * density
+        strokeWidth = 3.5f * density
         style = android.graphics.Paint.Style.STROKE
         isAntiAlias = true
     }
 
-    // Draw edges
+    // Fill crop polygon with a subtle translucent tint
+    val fillPath = androidx.compose.ui.graphics.Path().apply {
+        moveTo(pts[0].x, pts[0].y)
+        lineTo(pts[1].x, pts[1].y)
+        lineTo(pts[2].x, pts[2].y)
+        lineTo(pts[3].x, pts[3].y)
+        close()
+    }
+    drawPath(
+        path = fillPath,
+        color = androidx.compose.ui.graphics.Color(0x2200FFFF)
+    )
+
+    // Draw quad edges
     drawContext.canvas.nativeCanvas.apply {
         save()
         drawLine(pts[0].x, pts[0].y, pts[1].x, pts[1].y, edgePaint)
@@ -375,15 +401,37 @@ private fun DrawScope.drawCropQuad(corners: List<Offset>) {
         restore()
     }
 
-    // Draw corner circles
-    val handlePaint = android.graphics.Paint().apply {
+    // Draw corner handles (enlarged with white border and glowing aura when active)
+    val normalRadius = 14f * density
+    val activeRadius = 22f * density
+
+    val handleFillPaint = android.graphics.Paint().apply {
         color = Color.CYAN
         style = android.graphics.Paint.Style.FILL
         isAntiAlias = true
     }
-    val r = 14f * density
+    val handleStrokePaint = android.graphics.Paint().apply {
+        color = Color.WHITE
+        strokeWidth = 3f * density
+        style = android.graphics.Paint.Style.STROKE
+        isAntiAlias = true
+    }
+    val activeGlowPaint = android.graphics.Paint().apply {
+        color = Color.argb(128, 0, 255, 255)
+        style = android.graphics.Paint.Style.FILL
+        isAntiAlias = true
+    }
+
     drawContext.canvas.nativeCanvas.apply {
-        pts.forEach { p -> drawCircle(p.x, p.y, r, handlePaint) }
+        pts.forEachIndexed { i, p ->
+            val isActive = i == activeDraggingIndex
+            val r = if (isActive) activeRadius else normalRadius
+            if (isActive) {
+                drawCircle(p.x, p.y, r + 8f * density, activeGlowPaint)
+            }
+            drawCircle(p.x, p.y, r, handleFillPaint)
+            drawCircle(p.x, p.y, r, handleStrokePaint)
+        }
     }
 }
 
