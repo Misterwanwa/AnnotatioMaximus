@@ -5,14 +5,22 @@ import android.graphics.Paint
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -22,7 +30,9 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -40,18 +50,34 @@ private data class SketchStroke(
     val strokeWidth: Float
 )
 
+// Color palette for sketching
+private val sketchColors = listOf(
+    Color.Black,
+    Color.Red,
+    Color(0xFFFF9800), // Orange
+    Color.Yellow,
+    Color.Green,
+    Color(0xFF2196F3), // Blue
+    Color(0xFF9C27B0), // Purple
+    Color(0xFF795548), // Brown
+    Color.Gray,
+    Color(0xFFE91E63)  // Pink
+)
+
 @Composable
 fun GeminiSketchDialog(
     initialColor: Color,
     strokeWidth: Float,
     onDismiss: () -> Unit,
-    onSend: (Bitmap) -> Unit
+    onSend: (Bitmap, String) -> Unit
 ) {
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     val strokes = remember { mutableStateListOf<SketchStroke>() }
     var currentPoints by remember { mutableStateOf<List<Offset>>(emptyList()) }
+    var selectedColor by remember { mutableStateOf(initialColor) }
+    var customRules by remember { mutableStateOf("") }
 
-    val gestureModifier = Modifier.pointerInput(initialColor, strokeWidth) {
+    val gestureModifier = Modifier.pointerInput(selectedColor, strokeWidth) {
         detectDragGestures(
             onDragStart = { offset ->
                 currentPoints = listOf(offset)
@@ -65,7 +91,7 @@ fun GeminiSketchDialog(
                     strokes.add(
                         SketchStroke(
                             points = currentPoints,
-                            color = initialColor,
+                            color = selectedColor,
                             strokeWidth = strokeWidth
                         )
                     )
@@ -88,6 +114,22 @@ fun GeminiSketchDialog(
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(modifier = Modifier.height(12.dp))
+                
+                // Color Palette
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    sketchColors.forEach { color ->
+                        ColorPickerItem(
+                            color = color,
+                            isSelected = color == selectedColor,
+                            onClick = { selectedColor = color }
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
                 Canvas(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -131,7 +173,7 @@ fun GeminiSketchDialog(
                             }
                             drawPath(
                                 path = path,
-                                color = initialColor,
+                                color = selectedColor,
                                 style = Stroke(
                                     width = strokeWidth,
                                     cap = StrokeCap.Round,
@@ -140,6 +182,15 @@ fun GeminiSketchDialog(
                             )
                         }
                     }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = customRules,
+                    onValueChange = { customRules = it },
+                    label = { Text("Zusätzliche Design-Regeln / Modifikationen") },
+                    placeholder = { Text("Z.B. 'Verwende einen modernen Flat-Design-Stil'...") },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 3
                 )
             }
         },
@@ -182,13 +233,19 @@ fun GeminiSketchDialog(
                         drawStroke(
                             SketchStroke(
                                 points = currentPoints,
-                                color = initialColor,
+                                color = selectedColor,
                                 strokeWidth = strokeWidth
                             )
                         )
                     }
 
-                    onSend(bitmap)
+                    val basePrompt = "Erstelle aus dieser Skizze ein Bild, eine Infografik oder etwas anderes graphisches"
+                    val fullPrompt = if (customRules.isNotBlank()) {
+                        "$basePrompt\n\nZusätzliche Anweisungen:\n$customRules"
+                    } else {
+                        basePrompt
+                    }
+                    onSend(bitmap, fullPrompt)
                 }
             ) {
                 Text("An Gemini senden")
@@ -200,4 +257,34 @@ fun GeminiSketchDialog(
             }
         }
     )
+}
+
+@Composable
+private fun ColorPickerItem(
+    color: Color,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .clip(CircleShape)
+            .background(color)
+            .border(
+                width = if (isSelected) 3.dp else 1.dp,
+                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray,
+                shape = CircleShape
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        if (isSelected) {
+            Box(
+                modifier = Modifier
+                    .size(12.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.5f))
+            )
+        }
+    }
 }

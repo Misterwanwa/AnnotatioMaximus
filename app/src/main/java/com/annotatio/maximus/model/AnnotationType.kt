@@ -19,5 +19,6 @@ enum class AnnotationType {
     RECTANGLE,
     TRIANGLE,
     SIGNATURE,
-    SMART_GRAPHIC
+    SMART_GRAPHIC,
+    HAND
 }

@@ -21,10 +21,14 @@ import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -38,6 +42,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -47,10 +52,15 @@ import androidx.compose.ui.unit.dp
 import com.annotatio.maximus.model.Annotation
 import com.annotatio.maximus.model.AnnotationType
 import com.annotatio.maximus.model.DrawingPath
+import com.annotatio.maximus.model.PageTextContent
 import com.annotatio.maximus.model.PathPoint
 import com.annotatio.maximus.model.ShapeType
 import com.annotatio.maximus.model.SmartGraphicType
 import com.annotatio.maximus.model.TextBoxFont
+import com.annotatio.maximus.util.RecognizedShape
+import com.annotatio.maximus.util.ShapeRecognizer
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -71,66 +81,271 @@ fun AnnotationCanvas(
     onRequestSignature: (Float, Float) -> Unit,
     onRequestComment: (Float, Float) -> Unit,
     onRequestTable: (Float, Float) -> Unit,
-    onRequestImage: (Float, Float) -> Unit = {},
-    onRequestLink: (Float, Float) -> Unit = {},
-    onRequestTextBox: (Float, Float) -> Unit = {},
+    onRequestImage: (Float, Float) -> Unit = { _, _ -> },
+    onRequestLink: (Float, Float) -> Unit = { _, _ -> },
+    onRequestTextBox: (Float, Float) -> Unit = { _, _ -> },
+    onEditTextBox: (Annotation.TextBox) -> Unit = { _ -> },
     pendingSmartGraphicType: SmartGraphicType = SmartGraphicType.MIND_MAP,
+    externalImageCache: Map<String, ImageBitmap?>? = null,
+    pageTextContent: PageTextContent? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    
+    // Stroke bounds cache to optimize hit testing during eraser drag
+    val strokeBoundsCache = remember(annotations) {
+        annotations.filterIsInstance<Annotation.Stroke>().associate { stroke ->
+            val points = stroke.path.points
+            val bounds = if (points.isEmpty()) {
+                Rect(0f, 0f, 0f, 0f)
+            } else {
+                var minX = points.first().x
+                var maxX = minX
+                var minY = points.first().y
+                var maxY = minY
+                for (pt in points) {
+                    if (pt.x < minX) minX = pt.x
+                    if (pt.x > maxX) maxX = pt.x
+                    if (pt.y < minY) minY = pt.y
+                    if (pt.y > maxY) maxY = pt.y
+                }
+                Rect(minX, minY, maxX, maxY)
+            }
+            stroke.id to bounds
+        }
+    }
+
+    // Cache for decoded signature bitmaps: annotationId -> ImageBitmap
+    val signatureBitmapCache = remember(annotations) {
+        annotations.filterIsInstance<Annotation.Signature>().associate { sig ->
+            sig.id to try {
+                BitmapFactory.decodeByteArray(sig.bitmapData, 0, sig.bitmapData.size)?.asImageBitmap()
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+    
     var currentPoints by remember { mutableStateOf<List<PathPoint>>(emptyList()) }
     var dragStart by remember { mutableStateOf<Offset?>(null) }
     var dragCurrent by remember { mutableStateOf<Offset?>(null) }
+    
+    // Shape recognition state
+    var pendingStroke by remember { mutableStateOf<Annotation.Stroke?>(null) }
+    var shapeRecognitionJob by remember { mutableStateOf<Job?>(null) }
+    var shapeRecognitionCountdown by remember { mutableStateOf(0) }
+    var recognizedShape by remember { mutableStateOf<RecognizedShape?>(null) }
 
     // Cache for loaded image bitmaps: uriString -> ImageBitmap
-    val imageBitmapCache = remember { mutableMapOf<String, ImageBitmap?>() }
-    // Load any Image annotations not yet in cache
-    val imageAnnotations = annotations.filterIsInstance<Annotation.Image>()
-    for (img in imageAnnotations) {
-        if (!imageBitmapCache.containsKey(img.uriString)) {
-            imageBitmapCache[img.uriString] = try {
-                context.contentResolver.openInputStream(Uri.parse(img.uriString))?.use { stream ->
-                    BitmapFactory.decodeStream(stream)?.asImageBitmap()
+    val localImageBitmapCache = remember { mutableMapOf<String, ImageBitmap?>() }
+    val imageBitmapCache: Map<String, ImageBitmap?> = externalImageCache ?: localImageBitmapCache
+    if (externalImageCache == null) {
+        LaunchedEffect(annotations) {
+            kotlinx.coroutines.withContext(Dispatchers.IO) {
+                for (img in annotations.filterIsInstance<Annotation.Image>()) {
+                    if (!localImageBitmapCache.containsKey(img.uriString)) {
+                        val bitmap = try {
+                            context.contentResolver.openInputStream(Uri.parse(img.uriString))?.use { stream ->
+                                BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                            }
+                        } catch (_: Exception) {
+                            null
+                        }
+                        localImageBitmapCache[img.uriString] = bitmap
+                    }
                 }
-            } catch (_: Exception) {
-                null
             }
         }
     }
 
     val gestureModifier = when (activeTool) {
         AnnotationType.PEN, AnnotationType.HIGHLIGHTER -> {
-            Modifier.pointerInput(activeTool, penColor, penStrokeWidth) {
+            Modifier.pointerInput(activeTool, penColor, penStrokeWidth, pendingStroke) {
+                var lastMoveTime = 0L
+                var lastMovePos = Offset.Zero
+                
                 detectDragGestures(
                     onDragStart = { offset ->
+                        shapeRecognitionJob?.cancel()
+                        pendingStroke = null
+                        shapeRecognitionCountdown = 0
+                        recognizedShape = null
+                        
                         currentPoints = listOf(screenToNormalized(offset, pageInfo))
                         dragStart = null
                         dragCurrent = null
+                        
+                        lastMoveTime = System.currentTimeMillis()
+                        lastMovePos = offset
+                        
+                        if (activeTool == AnnotationType.PEN) {
+                            shapeRecognitionJob = coroutineScope.launch {
+                                var isHolding = false
+                                while (true) {
+                                    delay(100)
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastMoveTime >= 1000 && !isHolding) {
+                                        isHolding = true
+                                        shapeRecognitionCountdown = 3
+                                        pendingStroke = Annotation.Stroke(
+                                            pageIndex = currentPageIndex,
+                                            path = DrawingPath(currentPoints, penColor, penStrokeWidth, false)
+                                        )
+                                        
+                                        while (shapeRecognitionCountdown > 0) {
+                                            val screenPoints = currentPoints.map { normalizedToScreen(it, pageInfo) }
+                                            recognizedShape = ShapeRecognizer.recognize(screenPoints)
+                                            
+                                            delay(1000)
+                                            shapeRecognitionCountdown--
+                                            
+                                            pendingStroke = Annotation.Stroke(
+                                                pageIndex = currentPageIndex,
+                                                path = DrawingPath(currentPoints, penColor, penStrokeWidth, false)
+                                            )
+                                        }
+                                        
+                                        // Auto-shape recognition complete!
+                                        val screenPoints = currentPoints.map { normalizedToScreen(it, pageInfo) }
+                                        val shape = ShapeRecognizer.recognize(screenPoints)
+                                        val shapeAnnotation = ShapeRecognizer.toAnnotation(
+                                            shape = shape,
+                                            pageIndex = currentPageIndex,
+                                            color = penColor,
+                                            strokeWidth = penStrokeWidth
+                                        )
+                                        
+                                        if (shapeAnnotation != null) {
+                                            onAddAnnotation(shapeAnnotation)
+                                        } else {
+                                            onAddAnnotation(
+                                                Annotation.Stroke(
+                                                    pageIndex = currentPageIndex,
+                                                    path = DrawingPath(currentPoints, penColor, penStrokeWidth, false)
+                                                )
+                                            )
+                                        }
+                                        
+                                        currentPoints = emptyList()
+                                        pendingStroke = null
+                                        shapeRecognitionCountdown = 0
+                                        recognizedShape = null
+                                        break
+                                    }
+                                }
+                            }
+                        }
                     },
                     onDrag = { change, _ ->
                         change.consume()
-                        val normalized = screenToNormalized(change.position, pageInfo)
+                        val pos = change.position
+                        val normalized = screenToNormalized(pos, pageInfo)
                         currentPoints = currentPoints + normalized
+                        
+                        val dist = (pos - lastMovePos).getDistance()
+                        if (dist > 15f) {
+                            lastMoveTime = System.currentTimeMillis()
+                            lastMovePos = pos
+                            
+                            if (pendingStroke != null) {
+                                pendingStroke = null
+                                shapeRecognitionCountdown = 0
+                                recognizedShape = null
+                                
+                                shapeRecognitionJob?.cancel()
+                                if (activeTool == AnnotationType.PEN) {
+                                    shapeRecognitionJob = coroutineScope.launch {
+                                        var isHolding = false
+                                        while (true) {
+                                            delay(100)
+                                            val now = System.currentTimeMillis()
+                                            if (now - lastMoveTime >= 1000 && !isHolding) {
+                                                isHolding = true
+                                                shapeRecognitionCountdown = 3
+                                                pendingStroke = Annotation.Stroke(
+                                                    pageIndex = currentPageIndex,
+                                                    path = DrawingPath(currentPoints, penColor, penStrokeWidth, false)
+                                                )
+                                                while (shapeRecognitionCountdown > 0) {
+                                                    val screenPoints = currentPoints.map { normalizedToScreen(it, pageInfo) }
+                                                    recognizedShape = ShapeRecognizer.recognize(screenPoints)
+                                                    delay(1000)
+                                                    shapeRecognitionCountdown--
+                                                    pendingStroke = Annotation.Stroke(
+                                                        pageIndex = currentPageIndex,
+                                                        path = DrawingPath(currentPoints, penColor, penStrokeWidth, false)
+                                                    )
+                                                }
+                                                val screenPoints = currentPoints.map { normalizedToScreen(it, pageInfo) }
+                                                val shape = ShapeRecognizer.recognize(screenPoints)
+                                                val shapeAnnotation = ShapeRecognizer.toAnnotation(
+                                                    shape = shape,
+                                                    pageIndex = currentPageIndex,
+                                                    color = penColor,
+                                                    strokeWidth = penStrokeWidth
+                                                )
+                                                if (shapeAnnotation != null) {
+                                                    onAddAnnotation(shapeAnnotation)
+                                                } else {
+                                                    onAddAnnotation(
+                                                        Annotation.Stroke(
+                                                            pageIndex = currentPageIndex,
+                                                            path = DrawingPath(currentPoints, penColor, penStrokeWidth, false)
+                                                        )
+                                                    )
+                                                }
+                                                currentPoints = emptyList()
+                                                pendingStroke = null
+                                                shapeRecognitionCountdown = 0
+                                                recognizedShape = null
+                                                break
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     },
                     onDragEnd = {
+                        shapeRecognitionJob?.cancel()
                         if (currentPoints.size >= 2) {
                             val isHighlighter = activeTool == AnnotationType.HIGHLIGHTER
-                            val annotation = Annotation.Stroke(
-                                pageIndex = currentPageIndex,
-                                path = DrawingPath(
-                                    points = currentPoints,
-                                    color = penColor,
-                                    strokeWidth = if (isHighlighter) penStrokeWidth * 3f
-                                    else penStrokeWidth,
-                                    isHighlighter = isHighlighter
+                            if (isHighlighter) {
+                                val annotation = Annotation.Stroke(
+                                    pageIndex = currentPageIndex,
+                                    path = DrawingPath(
+                                        points = currentPoints,
+                                        color = penColor,
+                                        strokeWidth = penStrokeWidth * 3f,
+                                        isHighlighter = true
+                                    )
                                 )
-                            )
-                            onAddAnnotation(annotation)
+                                onAddAnnotation(annotation)
+                            } else {
+                                val stroke = Annotation.Stroke(
+                                    pageIndex = currentPageIndex,
+                                    path = DrawingPath(
+                                        points = currentPoints,
+                                        color = penColor,
+                                        strokeWidth = penStrokeWidth,
+                                        isHighlighter = false
+                                    )
+                                )
+                                onAddAnnotation(stroke)
+                            }
                         }
                         currentPoints = emptyList()
+                        pendingStroke = null
+                        shapeRecognitionCountdown = 0
+                        recognizedShape = null
                     },
                     onDragCancel = {
+                        shapeRecognitionJob?.cancel()
                         currentPoints = emptyList()
+                        pendingStroke = null
+                        shapeRecognitionCountdown = 0
+                        recognizedShape = null
                     }
                 )
             }
@@ -188,7 +403,7 @@ fun AnnotationCanvas(
         }
 
         AnnotationType.UNDERLINE -> {
-            Modifier.pointerInput(activeTool, penColor, penStrokeWidth) {
+            Modifier.pointerInput(activeTool, penColor, penStrokeWidth, pageTextContent) {
                 detectDragGestures(
                     onDragStart = { offset ->
                         dragStart = offset
@@ -204,19 +419,43 @@ fun AnnotationCanvas(
                         if (s != null && e != null) {
                             val startNorm = screenToNormalized(s, pageInfo)
                             val endNorm = screenToNormalized(e, pageInfo)
-                            val x = minOf(startNorm.x, endNorm.x)
-                            val width = abs(endNorm.x - startNorm.x)
-                            val y = (startNorm.y + endNorm.y) / 2f
-                            if (width > 0.01f) {
-                                onAddAnnotation(
-                                    Annotation.Underline(
-                                        pageIndex = currentPageIndex,
-                                        x = x,
-                                        y = y,
-                                        width = width,
-                                        color = penColor
-                                    )
+                            val selectionStartX = minOf(startNorm.x, endNorm.x)
+                            val selectionEndX = maxOf(startNorm.x, endNorm.x)
+                            val selectionY = (startNorm.y + endNorm.y) / 2f
+                            
+                            if (selectionEndX - selectionStartX > 0.01f) {
+                                // Try to snap to text line
+                                val textLine = pageTextContent?.findTextLineForAnnotation(
+                                    startX = selectionStartX,
+                                    endX = selectionEndX,
+                                    y = selectionY
                                 )
+                                
+                                if (textLine != null) {
+                                    // Snap to text line: underline goes below the text
+                                    val snappedX = maxOf(textLine.x, selectionStartX)
+                                    val snappedEndX = minOf(textLine.right, selectionEndX)
+                                    onAddAnnotation(
+                                        Annotation.Underline(
+                                            pageIndex = currentPageIndex,
+                                            x = snappedX,
+                                            y = textLine.underlineY,
+                                            width = snappedEndX - snappedX,
+                                            color = penColor
+                                        )
+                                    )
+                                } else {
+                                    // Fallback to raw position if no text found
+                                    onAddAnnotation(
+                                        Annotation.Underline(
+                                            pageIndex = currentPageIndex,
+                                            x = selectionStartX,
+                                            y = selectionY,
+                                            width = selectionEndX - selectionStartX,
+                                            color = penColor
+                                        )
+                                    )
+                                }
                             }
                         }
                         dragStart = null
@@ -231,7 +470,7 @@ fun AnnotationCanvas(
         }
 
         AnnotationType.STRIKETHROUGH -> {
-            Modifier.pointerInput(activeTool, penColor, penStrokeWidth) {
+            Modifier.pointerInput(activeTool, penColor, penStrokeWidth, pageTextContent) {
                 detectDragGestures(
                     onDragStart = { offset ->
                         dragStart = offset
@@ -247,19 +486,43 @@ fun AnnotationCanvas(
                         if (s != null && e != null) {
                             val startNorm = screenToNormalized(s, pageInfo)
                             val endNorm = screenToNormalized(e, pageInfo)
-                            val x = minOf(startNorm.x, endNorm.x)
-                            val width = abs(endNorm.x - startNorm.x)
-                            val y = (startNorm.y + endNorm.y) / 2f
-                            if (width > 0.01f) {
-                                onAddAnnotation(
-                                    Annotation.Strikethrough(
-                                        pageIndex = currentPageIndex,
-                                        x = x,
-                                        y = y,
-                                        width = width,
-                                        color = penColor
-                                    )
+                            val selectionStartX = minOf(startNorm.x, endNorm.x)
+                            val selectionEndX = maxOf(startNorm.x, endNorm.x)
+                            val selectionY = (startNorm.y + endNorm.y) / 2f
+                            
+                            if (selectionEndX - selectionStartX > 0.01f) {
+                                // Try to snap to text line
+                                val textLine = pageTextContent?.findTextLineForAnnotation(
+                                    startX = selectionStartX,
+                                    endX = selectionEndX,
+                                    y = selectionY
                                 )
+                                
+                                if (textLine != null) {
+                                    // Snap to text line: strikethrough goes through the middle
+                                    val snappedX = maxOf(textLine.x, selectionStartX)
+                                    val snappedEndX = minOf(textLine.right, selectionEndX)
+                                    onAddAnnotation(
+                                        Annotation.Strikethrough(
+                                            pageIndex = currentPageIndex,
+                                            x = snappedX,
+                                            y = textLine.centerY,
+                                            width = snappedEndX - snappedX,
+                                            color = penColor
+                                        )
+                                    )
+                                } else {
+                                    // Fallback to raw position if no text found
+                                    onAddAnnotation(
+                                        Annotation.Strikethrough(
+                                            pageIndex = currentPageIndex,
+                                            x = selectionStartX,
+                                            y = selectionY,
+                                            width = selectionEndX - selectionStartX,
+                                            color = penColor
+                                        )
+                                    )
+                                }
                             }
                         }
                         dragStart = null
@@ -328,16 +591,29 @@ fun AnnotationCanvas(
         }
 
         AnnotationType.TEXT_BOX -> {
-            Modifier.pointerInput(Unit) {
+            Modifier.pointerInput(annotations) {
                 detectTapGestures { offset ->
                     val normalized = screenToNormalized(offset, pageInfo)
-                    onRequestTextBox(normalized.x, normalized.y)
+                    
+                    // Check if there's an existing TextBox at this position
+                    val hitTextBox = annotations.filterIsInstance<Annotation.TextBox>().findLast { textBox ->
+                        normalized.x in textBox.x..(textBox.x + textBox.width) &&
+                        normalized.y in textBox.y..(textBox.y + textBox.height)
+                    }
+                    
+                    if (hitTextBox != null) {
+                        // Edit existing text box
+                        onEditTextBox(hitTextBox)
+                    } else {
+                        // Create new text box (optional - could be disabled)
+                        onRequestTextBox(normalized.x, normalized.y)
+                    }
                 }
             }
         }
 
-        AnnotationType.SELECT, AnnotationType.LASSO -> {
-            // Handled by SelectLassoOverlay
+        AnnotationType.SELECT, AnnotationType.LASSO, AnnotationType.HAND -> {
+            // Handled by SelectLassoOverlay or the PDF viewer itself
             Modifier
         }
 
@@ -381,82 +657,44 @@ fun AnnotationCanvas(
         }
 
         AnnotationType.ERASER -> {
-            Modifier.pointerInput(Unit) {
-                detectTapGestures { offset ->
-                    val normalized = screenToNormalized(offset, pageInfo)
-                    val threshold = 0.03f
-                    val hit = annotations.findLast { annotation ->
-                        when (annotation) {
-                            is Annotation.Stroke -> {
-                                annotation.path.points.any { pt ->
-                                    abs(pt.x - normalized.x) < threshold &&
-                                            abs(pt.y - normalized.y) < threshold
+            Modifier.pointerInput(annotations, strokeBoundsCache) {
+                detectDragGestures(
+                    onDragStart = { offset ->
+                        dragStart = offset
+                        val normalized = screenToNormalized(offset, pageInfo)
+                        val pad = 0.02f
+                        val hit = annotations.findLast { annotation ->
+                            annotationHitTest(annotation, normalized, pad, strokeBoundsCache)
+                        }
+                        hit?.let { onRemoveAnnotation(it.id) }
+                    },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        dragCurrent = change.position
+                        
+                        val currentAnnotations = annotations.toList()
+                        coroutineScope.launch(Dispatchers.Default) {
+                            val normalized = screenToNormalized(change.position, pageInfo)
+                            val pad = 0.02f
+                            val hit = currentAnnotations.findLast { annotation ->
+                                annotationHitTest(annotation, normalized, pad, strokeBoundsCache)
+                            }
+                            if (hit != null) {
+                                launch(Dispatchers.Main) {
+                                    onRemoveAnnotation(hit.id)
                                 }
                             }
-
-                            is Annotation.HighlightRect -> {
-                                normalized.x in annotation.x..(annotation.x + annotation.width) &&
-                                        normalized.y in annotation.y..(annotation.y + annotation.height)
-                            }
-
-                            is Annotation.TextNote -> {
-                                abs(annotation.x - normalized.x) < threshold * 2 &&
-                                        abs(annotation.y - normalized.y) < threshold * 2
-                            }
-
-                            is Annotation.Shape -> {
-                                normalized.x in annotation.x..(annotation.x + annotation.width) &&
-                                        normalized.y in annotation.y..(annotation.y + annotation.height)
-                            }
-
-                            is Annotation.Signature -> {
-                                normalized.x in annotation.x..(annotation.x + annotation.width) &&
-                                        normalized.y in annotation.y..(annotation.y + annotation.height)
-                            }
-
-                            is Annotation.Underline -> {
-                                normalized.x in annotation.x..(annotation.x + annotation.width) &&
-                                        abs(annotation.y - normalized.y) < threshold * 2
-                            }
-
-                            is Annotation.Strikethrough -> {
-                                normalized.x in annotation.x..(annotation.x + annotation.width) &&
-                                        abs(annotation.y - normalized.y) < threshold * 2
-                            }
-
-                            is Annotation.Comment -> {
-                                abs(annotation.x - normalized.x) < threshold * 2 &&
-                                        abs(annotation.y - normalized.y) < threshold * 2
-                            }
-
-                            is Annotation.Table -> {
-                                normalized.x in annotation.x..(annotation.x + annotation.width) &&
-                                        normalized.y in annotation.y..(annotation.y + annotation.height)
-                            }
-
-                            is Annotation.Image -> {
-                                normalized.x in annotation.x..(annotation.x + annotation.width) &&
-                                        normalized.y in annotation.y..(annotation.y + annotation.height)
-                            }
-
-                            is Annotation.Link -> {
-                                abs(annotation.x - normalized.x) < threshold * 3 &&
-                                        abs(annotation.y - normalized.y) < threshold * 2
-                            }
-
-                            is Annotation.SmartGraphic -> {
-                                normalized.x in annotation.x..(annotation.x + annotation.width) &&
-                                        normalized.y in annotation.y..(annotation.y + annotation.height)
-                            }
-
-                            is Annotation.TextBox -> {
-                                normalized.x in annotation.x..(annotation.x + annotation.width) &&
-                                        normalized.y in annotation.y..(annotation.y + annotation.height)
-                            }
                         }
+                    },
+                    onDragEnd = {
+                        dragStart = null
+                        dragCurrent = null
+                    },
+                    onDragCancel = {
+                        dragStart = null
+                        dragCurrent = null
                     }
-                    hit?.let { onRemoveAnnotation(it.id) }
-                }
+                )
             }
         }
     }
@@ -468,7 +706,7 @@ fun AnnotationCanvas(
     ) {
         // Draw existing annotations
         for (annotation in annotations) {
-            drawAnnotation(annotation, pageInfo, imageBitmapCache)
+            drawAnnotation(annotation, pageInfo, imageBitmapCache, signatureBitmapCache)
         }
 
         // Draw in-progress stroke
@@ -476,25 +714,177 @@ fun AnnotationCanvas(
             val isHighlighter = activeTool == AnnotationType.HIGHLIGHTER
             drawPathFromPoints(
                 points = currentPoints,
-                color = if (isHighlighter) penColor.copy(alpha = 0.35f) else penColor,
+                color = if (isHighlighter) penColor.copy(alpha = 0.6f) else penColor,
                 strokeWidth = if (isHighlighter) penStrokeWidth * 3f else penStrokeWidth,
-                pageInfo = pageInfo
+                pageInfo = pageInfo,
+                blendMode = if (isHighlighter) BlendMode.Multiply else BlendMode.SrcOver
             )
         }
+        
+        // Draw pending stroke (during shape recognition countdown)
+        if (pendingStroke != null && shapeRecognitionCountdown > 0) {
+            val stroke = pendingStroke!!
+            drawPathFromPoints(
+                points = stroke.path.points,
+                color = stroke.path.color.copy(alpha = 0.5f),
+                strokeWidth = stroke.path.strokeWidth,
+                pageInfo = pageInfo
+            )
+            
+            // Draw countdown indicator
+            val centerX = size.width / 2
+            val centerY = size.height * 0.15f
+            
+            // Background circle
+            drawCircle(
+                color = Color.Black.copy(alpha = 0.6f),
+                radius = 30f,
+                center = Offset(centerX, centerY)
+            )
+            
+            // Countdown text - using native paint directly
+            val textPaint = android.graphics.Paint().apply {
+                color = android.graphics.Color.WHITE
+                textSize = 64f
+                textAlign = android.graphics.Paint.Align.CENTER
+                isAntiAlias = true
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+            }
+            
+            drawContext.canvas.nativeCanvas.drawText(
+                shapeRecognitionCountdown.toString(),
+                centerX,
+                centerY + 20f,
+                textPaint
+            )
+            
+            // Draw recognized shape preview (if any)
+            recognizedShape?.let { shape ->
+                when (shape) {
+                    is RecognizedShape.Circle -> {
+                        val center = normalizedToScreen(
+                            PathPoint(shape.center.x, shape.center.y), pageInfo
+                        )
+                        val radius = shape.radius * pageInfo.pageWidth
+                        drawCircle(
+                            color = penColor.copy(alpha = 0.3f),
+                            radius = radius,
+                            center = center,
+                            style = Stroke(width = 4f)
+                        )
+                    }
+                    is RecognizedShape.Rectangle -> {
+                        val topLeft = normalizedToScreen(
+                            PathPoint(shape.bounds.left, shape.bounds.top), pageInfo
+                        )
+                        drawRect(
+                            color = penColor.copy(alpha = 0.3f),
+                            topLeft = topLeft,
+                            size = Size(
+                                shape.bounds.width * pageInfo.pageWidth,
+                                shape.bounds.height * pageInfo.pageHeight
+                            ),
+                            style = Stroke(width = 4f)
+                        )
+                    }
+                    is RecognizedShape.Triangle -> {
+                        if (shape.points.size == 3) {
+                            val path = Path()
+                            val p0 = normalizedToScreen(
+                                PathPoint(shape.points[0].x, shape.points[0].y), pageInfo
+                            )
+                            val p1 = normalizedToScreen(
+                                PathPoint(shape.points[1].x, shape.points[1].y), pageInfo
+                            )
+                            val p2 = normalizedToScreen(
+                                PathPoint(shape.points[2].x, shape.points[2].y), pageInfo
+                            )
+                            path.moveTo(p0.x, p0.y)
+                            path.lineTo(p1.x, p1.y)
+                            path.lineTo(p2.x, p2.y)
+                            path.close()
+                            drawPath(
+                                path = path,
+                                color = penColor.copy(alpha = 0.3f),
+                                style = Stroke(width = 4f)
+                            )
+                        }
+                    }
+                    else -> { /* Other shapes not yet visualized */ }
+                }
+            }
+        }
 
-        // Draw in-progress underline / strikethrough preview
+        // Draw in-progress underline / strikethrough preview with text snap
         if (activeTool == AnnotationType.UNDERLINE || activeTool == AnnotationType.STRIKETHROUGH) {
             val s = dragStart
             val e = dragCurrent
             if (s != null && e != null) {
-                val lineY = (s.y + e.y) / 2f
+                val startNorm = screenToNormalized(s, pageInfo)
+                val endNorm = screenToNormalized(e, pageInfo)
+                val selectionStartX = minOf(startNorm.x, endNorm.x)
+                val selectionEndX = maxOf(startNorm.x, endNorm.x)
+                val selectionY = (startNorm.y + endNorm.y) / 2f
+                
+                // Try to find text line for preview snap
+                val textLine = pageTextContent?.findTextLineForAnnotation(
+                    startX = selectionStartX,
+                    endX = selectionEndX,
+                    y = selectionY
+                )
+                
+                val (previewY, isSnapped) = if (textLine != null) {
+                    // Snap to text line
+                    val snappedY = if (activeTool == AnnotationType.UNDERLINE) {
+                        textLine.underlineY
+                    } else {
+                        textLine.centerY
+                    }
+                    Pair(snappedY, true)
+                } else {
+                    // Use raw position
+                    Pair(selectionY, false)
+                }
+                
+                // Convert back to screen coordinates for drawing
+                val previewScreenY = normalizedToScreen(
+                    PathPoint(0f, previewY), 
+                    pageInfo
+                ).y
+                val startScreenX = minOf(s.x, e.x)
+                val endScreenX = maxOf(s.x, e.x)
+                
+                // Draw the preview line
                 drawLine(
-                    color = penColor.copy(alpha = 0.6f),
-                    start = Offset(minOf(s.x, e.x), lineY),
-                    end = Offset(maxOf(s.x, e.x), lineY),
+                    color = if (isSnapped) penColor else penColor.copy(alpha = 0.6f),
+                    start = Offset(startScreenX, previewScreenY),
+                    end = Offset(endScreenX, previewScreenY),
                     strokeWidth = penStrokeWidth * 1.5f,
                     cap = StrokeCap.Round
                 )
+                
+                // If snapped, draw a subtle indicator
+                if (isSnapped && textLine != null) {
+                    // Highlight the detected text line area faintly
+                    val topScreen = normalizedToScreen(
+                        PathPoint(0f, textLine.top), pageInfo
+                    ).y
+                    val bottomScreen = normalizedToScreen(
+                        PathPoint(0f, textLine.bottom), pageInfo
+                    ).y
+                    val leftScreen = normalizedToScreen(
+                        PathPoint(textLine.x, textLine.centerY), pageInfo
+                    ).x
+                    val rightScreen = normalizedToScreen(
+                        PathPoint(textLine.right, textLine.centerY), pageInfo
+                    ).x
+                    
+                    drawRect(
+                        color = penColor.copy(alpha = 0.1f),
+                        topLeft = Offset(leftScreen, topScreen),
+                        size = Size(rightScreen - leftScreen, bottomScreen - topScreen)
+                    )
+                }
             }
         }
 
@@ -565,6 +955,30 @@ fun AnnotationCanvas(
                 else -> {}
             }
         }
+        
+        // Draw eraser cursor
+        if (activeTool == AnnotationType.ERASER && dragCurrent != null) {
+            val eraserRadius = 20f
+            // Outer circle (white border)
+            drawCircle(
+                color = Color.White,
+                radius = eraserRadius + 4f,
+                center = dragCurrent!!,
+                style = Stroke(width = 2f)
+            )
+            // Inner circle (red with transparency)
+            drawCircle(
+                color = Color.Red.copy(alpha = 0.4f),
+                radius = eraserRadius,
+                center = dragCurrent!!
+            )
+            // Center dot
+            drawCircle(
+                color = Color.Red.copy(alpha = 0.8f),
+                radius = 4f,
+                center = dragCurrent!!
+            )
+        }
     }
 }
 
@@ -574,20 +988,34 @@ fun AnnotationDisplayOverlay(
     pageInfo: PdfPageInfo,
     onCommentTapped: ((Annotation.Comment) -> Unit)? = null,
     onTextBoxDoubleTapped: ((Annotation.TextBox) -> Unit)? = null,
+    externalImageCache: Map<String, ImageBitmap?>? = null,
     modifier: Modifier = Modifier
 ) {
     if (annotations.isEmpty()) return
 
     val context = LocalContext.current
-    val imageBitmapCache = remember { mutableMapOf<String, ImageBitmap?>() }
-    for (img in annotations.filterIsInstance<Annotation.Image>()) {
-        if (!imageBitmapCache.containsKey(img.uriString)) {
-            imageBitmapCache[img.uriString] = try {
-                context.contentResolver.openInputStream(Uri.parse(img.uriString))?.use { stream ->
-                    BitmapFactory.decodeStream(stream)?.asImageBitmap()
-                }
+    val localImageBitmapCache = remember { mutableMapOf<String, ImageBitmap?>() }
+    val imageBitmapCache: Map<String, ImageBitmap?> = externalImageCache ?: localImageBitmapCache
+    
+    val signatureBitmapCache = remember(annotations) {
+        annotations.filterIsInstance<Annotation.Signature>().associate { sig ->
+            sig.id to try {
+                BitmapFactory.decodeByteArray(sig.bitmapData, 0, sig.bitmapData.size)?.asImageBitmap()
             } catch (_: Exception) {
                 null
+            }
+        }
+    }
+    if (externalImageCache == null) {
+        for (img in annotations.filterIsInstance<Annotation.Image>()) {
+            if (!localImageBitmapCache.containsKey(img.uriString)) {
+                localImageBitmapCache[img.uriString] = try {
+                    context.contentResolver.openInputStream(Uri.parse(img.uriString))?.use { stream ->
+                        BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                    }
+                } catch (_: Exception) {
+                    null
+                }
             }
         }
     }
@@ -622,7 +1050,7 @@ fun AnnotationDisplayOverlay(
 
     Canvas(modifier = modifier.fillMaxSize().then(tapModifier)) {
         for (annotation in annotations) {
-            drawAnnotation(annotation, pageInfo, imageBitmapCache)
+            drawAnnotation(annotation, pageInfo, imageBitmapCache, signatureBitmapCache)
         }
     }
 }
@@ -636,11 +1064,38 @@ fun AnnotationLayerOverlay(
     onUpdateAnnotation: (Annotation) -> Unit,
     onRemoveAnnotation: (String) -> Unit,
     onCopyAnnotation: (Annotation) -> Unit,
+    externalImageCache: Map<String, ImageBitmap?>? = null,
     modifier: Modifier = Modifier
 ) {
     if (annotations.isEmpty()) return
 
+    val context = LocalContext.current
     val density = LocalDensity.current
+    val localImageBitmapCache = remember { mutableMapOf<String, ImageBitmap?>() }
+    val imageBitmapCache: Map<String, ImageBitmap?> = externalImageCache ?: localImageBitmapCache
+    
+    val signatureBitmapCache = remember(annotations) {
+        annotations.filterIsInstance<Annotation.Signature>().associate { sig ->
+            sig.id to try {
+                BitmapFactory.decodeByteArray(sig.bitmapData, 0, sig.bitmapData.size)?.asImageBitmap()
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+    if (externalImageCache == null) {
+        for (img in annotations.filterIsInstance<Annotation.Image>()) {
+            if (!localImageBitmapCache.containsKey(img.uriString)) {
+                localImageBitmapCache[img.uriString] = try {
+                    context.contentResolver.openInputStream(Uri.parse(img.uriString))?.use { stream ->
+                        BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+    }
     val strokeAnnotations = annotations.filterIsInstance<Annotation.Stroke>()
     val selected = strokeAnnotations.find { it.id == selectedId }
     val selectedBounds = selected?.let { computeStrokeBoundsScreen(it, pageInfo) }
@@ -662,7 +1117,7 @@ fun AnnotationLayerOverlay(
         ) {
             // Draw all annotations as gewohnt
             for (annotation in annotations) {
-                drawAnnotation(annotation, pageInfo, emptyMap())
+                drawAnnotation(annotation, pageInfo, imageBitmapCache, signatureBitmapCache)
             }
 
             // Draw selection rectangle for the selected stroke
@@ -911,22 +1366,101 @@ private fun computeStrokeBoundsNormalized(stroke: Annotation.Stroke): Rect {
     return Rect(minX, minY, maxX, maxY)
 }
 
+/** Bounding-box hit test for eraser and selection tools. pad is in normalized coordinates. */
+internal fun annotationHitTest(
+    annotation: Annotation,
+    norm: PathPoint,
+    pad: Float,
+    strokeBoundsCache: Map<String, Rect> = emptyMap()
+): Boolean {
+    return when (annotation) {
+        is Annotation.Stroke -> {
+            val cachedBounds = strokeBoundsCache[annotation.id]
+            if (cachedBounds != null) {
+                norm.x in (cachedBounds.left - pad)..(cachedBounds.right + pad) &&
+                norm.y in (cachedBounds.top - pad)..(cachedBounds.bottom + pad)
+            } else {
+                if (annotation.path.points.isEmpty()) false
+                else {
+                    var minX = annotation.path.points.first().x
+                    var maxX = minX
+                    var minY = annotation.path.points.first().y
+                    var maxY = minY
+                    for (pt in annotation.path.points) {
+                        if (pt.x < minX) minX = pt.x
+                        if (pt.x > maxX) maxX = pt.x
+                        if (pt.y < minY) minY = pt.y
+                        if (pt.y > maxY) maxY = pt.y
+                    }
+                    norm.x in (minX - pad)..(maxX + pad) && norm.y in (minY - pad)..(maxY + pad)
+                }
+            }
+        }
+        is Annotation.HighlightRect ->
+            norm.x in (annotation.x - pad)..(annotation.x + annotation.width + pad) &&
+            norm.y in (annotation.y - pad)..(annotation.y + annotation.height + pad)
+        is Annotation.TextNote ->
+            norm.x in (annotation.x - pad * 3)..(annotation.x + pad * 3) &&
+            norm.y in (annotation.y - pad * 3)..(annotation.y + pad * 3)
+        is Annotation.Shape ->
+            norm.x in (annotation.x - pad)..(annotation.x + annotation.width + pad) &&
+            norm.y in (annotation.y - pad)..(annotation.y + annotation.height + pad)
+        is Annotation.Underline ->
+            norm.x in (annotation.x - pad)..(annotation.x + annotation.width + pad) &&
+            norm.y in (annotation.y - pad * 3)..(annotation.y + pad * 3)
+        is Annotation.Strikethrough ->
+            norm.x in (annotation.x - pad)..(annotation.x + annotation.width + pad) &&
+            norm.y in (annotation.y - pad * 3)..(annotation.y + pad * 3)
+        is Annotation.Table ->
+            norm.x in (annotation.x - pad)..(annotation.x + annotation.width + pad) &&
+            norm.y in (annotation.y - pad)..(annotation.y + annotation.height + pad)
+        is Annotation.Image ->
+            norm.x in (annotation.x - pad)..(annotation.x + annotation.width + pad) &&
+            norm.y in (annotation.y - pad)..(annotation.y + annotation.height + pad)
+        is Annotation.Link ->
+            norm.x in (annotation.x - pad)..(annotation.x + 0.15f + pad) &&
+            norm.y in (annotation.y - pad * 4)..(annotation.y + pad)
+        is Annotation.Comment ->
+            norm.x in (annotation.x - pad * 3)..(annotation.x + pad * 3) &&
+            norm.y in (annotation.y - pad * 3)..(annotation.y + pad * 3)
+        is Annotation.Signature ->
+            norm.x in (annotation.x - pad)..(annotation.x + annotation.width + pad) &&
+            norm.y in (annotation.y - pad)..(annotation.y + annotation.height + pad)
+        is Annotation.SmartGraphic ->
+            norm.x in (annotation.x - pad)..(annotation.x + annotation.width + pad) &&
+            norm.y in (annotation.y - pad)..(annotation.y + annotation.height + pad)
+        is Annotation.TextBox ->
+            norm.x in (annotation.x - pad)..(annotation.x + annotation.width + pad) &&
+            norm.y in (annotation.y - pad)..(annotation.y + annotation.height + pad)
+    }
+}
+
 internal fun DrawScope.drawAnnotation(
     annotation: Annotation,
     pageInfo: PdfPageInfo,
-    imageBitmapCache: Map<String, ImageBitmap?>
+    imageBitmapCache: Map<String, ImageBitmap?>,
+    signatureBitmapCache: Map<String, ImageBitmap?> = emptyMap()
 ) {
     when (annotation) {
         is Annotation.Stroke -> {
             val path = annotation.path
             if (path.points.size < 2) return
-            val alpha = if (path.isHighlighter) 0.35f else 1f
-            drawPathFromPoints(
-                points = path.points,
-                color = path.color.copy(alpha = alpha),
-                strokeWidth = path.strokeWidth,
-                pageInfo = pageInfo
-            )
+            if (path.isHighlighter) {
+                drawPathFromPoints(
+                    points = path.points,
+                    color = path.color.copy(alpha = 0.6f),
+                    strokeWidth = path.strokeWidth,
+                    pageInfo = pageInfo,
+                    blendMode = BlendMode.Multiply
+                )
+            } else {
+                drawPathFromPoints(
+                    points = path.points,
+                    color = path.color,
+                    strokeWidth = path.strokeWidth,
+                    pageInfo = pageInfo
+                )
+            }
         }
 
         is Annotation.HighlightRect -> {
@@ -1170,7 +1704,36 @@ internal fun DrawScope.drawAnnotation(
         }
 
         is Annotation.Signature -> {
-            // TODO: Implement signature drawing from bitmap
+            val topLeft = normalizedToScreen(PathPoint(annotation.x, annotation.y), pageInfo)
+            val bottomRight = normalizedToScreen(
+                PathPoint(annotation.x + annotation.width, annotation.y + annotation.height), pageInfo
+            )
+            val imgW = bottomRight.x - topLeft.x
+            val imgH = bottomRight.y - topLeft.y
+            val bitmap = signatureBitmapCache[annotation.id] ?: try {
+                BitmapFactory.decodeByteArray(annotation.bitmapData, 0, annotation.bitmapData.size)?.asImageBitmap()
+            } catch (_: Exception) {
+                null
+            }
+            if (bitmap != null) {
+                drawImage(
+                    image = bitmap,
+                    dstOffset = androidx.compose.ui.unit.IntOffset(topLeft.x.toInt(), topLeft.y.toInt()),
+                    dstSize = androidx.compose.ui.unit.IntSize(imgW.toInt().coerceAtLeast(1), imgH.toInt().coerceAtLeast(1))
+                )
+            } else {
+                drawRect(
+                    color = Color.LightGray.copy(alpha = 0.5f),
+                    topLeft = topLeft,
+                    size = Size(imgW, imgH)
+                )
+                drawRect(
+                    color = Color.Gray,
+                    topLeft = topLeft,
+                    size = Size(imgW, imgH),
+                    style = Stroke(width = 1f)
+                )
+            }
         }
 
         is Annotation.TextBox -> {
@@ -1303,7 +1866,8 @@ private fun DrawScope.drawPathFromPoints(
     points: List<PathPoint>,
     color: Color,
     strokeWidth: Float,
-    pageInfo: PdfPageInfo
+    pageInfo: PdfPageInfo,
+    blendMode: BlendMode = BlendMode.SrcOver
 ) {
     if (points.size < 2) return
 
@@ -1311,9 +1875,20 @@ private fun DrawScope.drawPathFromPoints(
     val first = normalizedToScreen(points.first(), pageInfo)
     path.moveTo(first.x, first.y)
 
+    // Catmull-Rom spline for smooth curves
     for (i in 1 until points.size) {
         val pt = normalizedToScreen(points[i], pageInfo)
-        path.lineTo(pt.x, pt.y)
+        if (i == 1 || points.size <= 3) {
+            path.lineTo(pt.x, pt.y)
+        } else {
+            val prev = normalizedToScreen(points[i - 1], pageInfo)
+            val cp1x = prev.x + (pt.x - normalizedToScreen(points[i - 2], pageInfo).x) / 6f
+            val cp1y = prev.y + (pt.y - normalizedToScreen(points[i - 2], pageInfo).y) / 6f
+            val next = if (i + 1 < points.size) normalizedToScreen(points[i + 1], pageInfo) else pt
+            val cp2x = pt.x - (next.x - prev.x) / 6f
+            val cp2y = pt.y - (next.y - prev.y) / 6f
+            path.cubicTo(cp1x, cp1y, cp2x, cp2y, pt.x, pt.y)
+        }
     }
 
     drawPath(
@@ -1323,6 +1898,7 @@ private fun DrawScope.drawPathFromPoints(
             width = strokeWidth,
             cap = StrokeCap.Round,
             join = StrokeJoin.Round
-        )
+        ),
+        blendMode = blendMode
     )
 }

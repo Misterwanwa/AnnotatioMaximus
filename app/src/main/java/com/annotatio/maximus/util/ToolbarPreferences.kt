@@ -1,13 +1,14 @@
 package com.annotatio.maximus.util
 
 import android.content.Context
-import android.content.SharedPreferences
+import com.annotatio.maximus.ui.theme.AppTheme
 
 private const val PREFS_NAME = "toolbar_prefs"
 private const val PREFIX = "toolbar_show_"
 
 private val DEFAULT_VISIBILITY = mapOf(
     "open" to true,
+    "hand" to true,
     "pen" to true,
     "marker" to true,
     "underline" to true,
@@ -53,4 +54,19 @@ fun saveToolbarVisibility(context: Context, visibility: Map<String, Boolean>) {
         }
         apply()
     }
+}
+
+private const val KEY_APP_THEME = "app_theme"
+
+fun loadAppTheme(context: Context): AppTheme {
+    val name = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        .getString(KEY_APP_THEME, AppTheme.CUPERTINO_MINIMALIST.name)
+        ?: AppTheme.CUPERTINO_MINIMALIST.name
+    return try { AppTheme.valueOf(name) } catch (_: IllegalArgumentException) { AppTheme.CUPERTINO_MINIMALIST }
+}
+
+fun saveAppTheme(context: Context, theme: AppTheme) {
+    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+        .putString(KEY_APP_THEME, theme.name)
+        .apply()
 }

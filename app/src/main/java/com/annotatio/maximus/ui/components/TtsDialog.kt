@@ -19,6 +19,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -94,6 +96,9 @@ fun TtsDialog(
     var currentText by remember { mutableStateOf("") }
     var readingPage by remember { mutableIntStateOf(currentPage) }
 
+    var currentChunkIndex by remember { mutableIntStateOf(0) }
+    var chunks by remember { mutableStateOf<List<String>>(emptyList()) }
+
     // Init TTS
     DisposableEffect(Unit) {
         val engine = TextToSpeech(context) { status ->
@@ -107,18 +112,49 @@ fun TtsDialog(
         }
     }
 
-    fun speak(text: String) {
+    fun splitIntoChunks(text: String): List<String> {
+        if (text.isBlank()) return emptyList()
+        val regex = "(?<=[.!?\\n])\\s+".toRegex()
+        return text.split(regex).map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    fun speakChunk(index: Int) {
         val engine = tts ?: return
-        if (!ttsReady) return
+        if (!ttsReady || chunks.isEmpty()) return
+        val safeIndex = index.coerceIn(0, chunks.size - 1)
+        currentChunkIndex = safeIndex
+        val chunkText = chunks[safeIndex]
+        
         engine.setSpeechRate(speechRate)
         engine.language = Locale.getDefault()
+        
+        statusText = "Satz ${safeIndex + 1}/${chunks.size}: \"${chunkText.take(40)}...\""
+        
         engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) { isSpeaking = true; isPaused = false }
-            override fun onDone(utteranceId: String?) { isSpeaking = false; isPaused = false; statusText = "Fertig" }
+            override fun onStart(utteranceId: String?) {
+                isSpeaking = true
+                isPaused = false
+            }
+            override fun onDone(utteranceId: String?) {
+                scope.launch {
+                    if (currentChunkIndex < chunks.size - 1) {
+                        speakChunk(currentChunkIndex + 1)
+                    } else {
+                        isSpeaking = false
+                        isPaused = false
+                        statusText = "Fertig"
+                    }
+                }
+            }
             @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String?) { isSpeaking = false; statusText = "Fehler bei der Sprachausgabe" }
+            override fun onError(utteranceId: String?) {
+                scope.launch {
+                    isSpeaking = false
+                    statusText = "Fehler bei der Sprachausgabe"
+                }
+            }
         })
-        engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "tts_read")
+        engine.speak(chunkText, TextToSpeech.QUEUE_FLUSH, null, "tts_read_$safeIndex")
         isSpeaking = true
     }
 
@@ -129,9 +165,15 @@ fun TtsDialog(
             statusText = "Extrahiere Text von Seite ${page + 1}…"
             val text = extractPageText(context, file, page)
             currentText = text
+            chunks = splitIntoChunks(text)
+            currentChunkIndex = 0
             isLoading = false
             statusText = "Lese Seite ${page + 1} vor…"
-            speak(text)
+            if (chunks.isNotEmpty()) {
+                speakChunk(0)
+            } else {
+                statusText = "Kein extrahierbarer Text auf dieser Seite."
+            }
         }
     }
 
@@ -178,6 +220,23 @@ fun TtsDialog(
                         Icon(Icons.Default.SkipPrevious, contentDescription = "Vorherige Seite")
                     }
 
+                    // Rewind segment
+                    IconButton(
+                        onClick = {
+                            if (currentChunkIndex > 0) {
+                                speakChunk(currentChunkIndex - 1)
+                            } else {
+                                if (readingPage > 0) {
+                                    readingPage--
+                                    loadAndSpeak(readingPage)
+                                }
+                            }
+                        },
+                        enabled = ttsReady && (currentChunkIndex > 0 || readingPage > 0)
+                    ) {
+                        Icon(Icons.Default.FastRewind, contentDescription = "Satz zurückspulen")
+                    }
+
                     if (isLoading) {
                         CircularProgressIndicator(modifier = Modifier.size(36.dp))
                     } else {
@@ -194,7 +253,7 @@ fun TtsDialog(
                                         statusText = "Pausiert"
                                     }
                                     isPaused -> {
-                                        speak(currentText)
+                                        speakChunk(currentChunkIndex)
                                     }
                                     else -> {
                                         loadAndSpeak(readingPage)
@@ -222,6 +281,23 @@ fun TtsDialog(
                         enabled = isSpeaking || isPaused
                     ) {
                         Icon(Icons.Default.Stop, contentDescription = "Stopp")
+                    }
+
+                    // Forward segment
+                    IconButton(
+                        onClick = {
+                            if (currentChunkIndex < chunks.size - 1) {
+                                speakChunk(currentChunkIndex + 1)
+                            } else {
+                                if (readingPage < pageCount - 1) {
+                                    readingPage++
+                                    loadAndSpeak(readingPage)
+                                }
+                            }
+                        },
+                        enabled = ttsReady && (currentChunkIndex < chunks.size - 1 || readingPage < pageCount - 1)
+                    ) {
+                        Icon(Icons.Default.FastForward, contentDescription = "Satz vorspulen")
                     }
 
                     // Next page

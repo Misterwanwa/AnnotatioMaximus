@@ -3,14 +3,18 @@ package com.annotatio.maximus.viewmodel
 import android.content.Context
 import android.net.Uri
 import androidx.compose.ui.graphics.Color
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.viewModelScope
 import com.annotatio.maximus.model.Annotation
 import com.annotatio.maximus.model.AnnotationType
+import com.annotatio.maximus.model.PageTextContent
 import com.annotatio.maximus.ui.components.Bookmark
 import com.annotatio.maximus.ui.components.loadBookmarks
 import com.annotatio.maximus.ui.components.saveBookmarks
 import com.annotatio.maximus.util.PdfAnnotationSaver
+import com.annotatio.maximus.util.PdfTextExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,7 +24,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 
-class PdfViewModel : ViewModel() {
+class PdfViewModel(application: Application) : AndroidViewModel(application) {
 
     // PDF state
     private val _pdfUri = MutableStateFlow<Uri?>(null)
@@ -42,6 +46,24 @@ class PdfViewModel : ViewModel() {
     private val _strokeWidth = MutableStateFlow(4f)
     val strokeWidth: StateFlow<Float> = _strokeWidth.asStateFlow()
 
+    init {
+        val prefs = getApplication<Application>().getSharedPreferences("pdf_settings", Context.MODE_PRIVATE)
+        
+        // Active Tool
+        val toolName = prefs.getString("active_tool", null)
+        _activeTool.value = toolName?.let {
+            try { AnnotationType.valueOf(it) } catch (_: Exception) { null }
+        }
+        
+        // Pen Color
+        val colorArgb = prefs.getInt("pen_color", android.graphics.Color.BLACK)
+        _penColor.value = Color(colorArgb)
+        
+        // Stroke Width
+        val width = prefs.getFloat("stroke_width", 4f)
+        _strokeWidth.value = width
+    }
+
     // Annotations: pageIndex -> list of annotations
     private val _annotations = MutableStateFlow<Map<Int, List<Annotation>>>(emptyMap())
     val annotations: StateFlow<Map<Int, List<Annotation>>> = _annotations.asStateFlow()
@@ -49,6 +71,10 @@ class PdfViewModel : ViewModel() {
     // Bookmarks
     private val _bookmarks = MutableStateFlow<List<Bookmark>>(emptyList())
     val bookmarks: StateFlow<List<Bookmark>> = _bookmarks.asStateFlow()
+
+    // Page text content for smart underline/strikethrough
+    private val _pageTextContents = MutableStateFlow<Map<Int, PageTextContent>>(emptyMap())
+    val pageTextContents: StateFlow<Map<Int, PageTextContent>> = _pageTextContents.asStateFlow()
 
     // Undo / Redo
     private val undoStack = mutableListOf<UndoAction>()
@@ -69,13 +95,20 @@ class PdfViewModel : ViewModel() {
 
     fun clearSaveError() { _saveError.value = null }
 
+    private var textExtractionJob: kotlinx.coroutines.Job? = null
+
     fun openPdf(uri: Uri, context: Context) {
+        textExtractionJob?.cancel()
         _pdfUri.value = uri
         _annotations.value = emptyMap()
+        _pageTextContents.value = emptyMap()
         undoStack.clear()
         redoStack.clear()
         updateUndoRedoState()
         loadBookmarks(context, uri.toString())
+        
+        // Load text content for current page lazily
+        loadPageTextContent(context, 0)
     }
 
     fun openSamplePdf(context: Context) {
@@ -94,13 +127,40 @@ class PdfViewModel : ViewModel() {
         }
     }
 
-    fun onPageChanged(page: Int, count: Int) {
+    fun onPageChanged(page: Int, count: Int, context: Context? = null) {
         _currentPage.value = page
         _pageCount.value = count
+        context?.let { loadPageTextContent(it, page) }
     }
 
     fun navigateToPage(page: Int) {
         _currentPage.value = page
+    }
+
+    /**
+     * Load text content for a specific page lazily
+     */
+    fun loadPageTextContent(context: Context, pageIndex: Int) {
+        val uri = _pdfUri.value ?: return
+        if (_pageTextContents.value.containsKey(pageIndex)) return
+        
+        textExtractionJob = viewModelScope.launch(Dispatchers.IO) {
+            val content = PdfTextExtractor.extractTextFromPage(context, uri, pageIndex)
+            if (content != null) {
+                withContext(Dispatchers.Main) {
+                    val updated = _pageTextContents.value.toMutableMap()
+                    updated[pageIndex] = content
+                    _pageTextContents.value = updated
+                }
+            }
+        }
+    }
+
+    /**
+     * Get text content for a specific page
+     */
+    fun getPageTextContent(pageIndex: Int): PageTextContent? {
+        return _pageTextContents.value[pageIndex]
     }
 
     //region Bookmarks
@@ -137,14 +197,20 @@ class PdfViewModel : ViewModel() {
 
     fun selectTool(tool: AnnotationType?) {
         _activeTool.value = tool
+        val prefs = getApplication<Application>().getSharedPreferences("pdf_settings", Context.MODE_PRIVATE)
+        prefs.edit().putString("active_tool", tool?.name).apply()
     }
 
     fun setColor(color: Color) {
         _penColor.value = color
+        val prefs = getApplication<Application>().getSharedPreferences("pdf_settings", Context.MODE_PRIVATE)
+        prefs.edit().putInt("pen_color", color.toArgb()).apply()
     }
 
     fun setStrokeWidth(width: Float) {
         _strokeWidth.value = width
+        val prefs = getApplication<Application>().getSharedPreferences("pdf_settings", Context.MODE_PRIVATE)
+        prefs.edit().putFloat("stroke_width", width).apply()
     }
 
     fun addAnnotation(annotation: Annotation) {

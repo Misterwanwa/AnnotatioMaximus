@@ -2,6 +2,7 @@ package com.annotatio.maximus.ui.components
 
 import android.content.Context
 import android.net.Uri
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,7 +24,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,6 +42,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import androidx.compose.runtime.Composable
 
 data class SearchResult(val page: Int, val snippet: String)
 
@@ -99,6 +100,7 @@ fun SearchDialog(
     var results by remember { mutableStateOf<List<SearchResult>>(emptyList()) }
     var isSearching by remember { mutableStateOf(false) }
     var hasSearched by remember { mutableStateOf(false) }
+    var clickedResult by remember { mutableStateOf<SearchResult?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -150,7 +152,7 @@ fun SearchDialog(
                 } else if (hasSearched) {
                     if (results.isEmpty()) {
                         Text(
-                            "Keine Ergebnisse für „$query".",
+                            "Keine Ergebnisse für \"$query\".",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -163,10 +165,16 @@ fun SearchDialog(
                         Spacer(Modifier.height(4.dp))
                         LazyColumn(modifier = Modifier.fillMaxWidth().height(260.dp)) {
                             items(results) { result ->
+                                val isClicked = clickedResult == result
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .background(
+                                            if (isClicked) MaterialTheme.colorScheme.primaryContainer 
+                                            else androidx.compose.ui.graphics.Color.Transparent
+                                        )
                                         .clickable {
+                                            clickedResult = result
                                             onNavigateToPage(result.page)
                                             onDismiss()
                                         }

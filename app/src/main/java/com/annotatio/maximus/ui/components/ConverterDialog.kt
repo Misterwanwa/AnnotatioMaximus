@@ -1,7 +1,6 @@
 package com.annotatio.maximus.ui.components
 
 import android.content.Context
-import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
@@ -40,7 +39,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -64,10 +62,17 @@ private val CONVERT_FORMATS = listOf(
     ConvertFormat("EPUB", "application/epub+zip", "epub", Icons.Default.MenuBook)
 )
 
+/**
+ * [ConverterDialog] converts the open PDF to one of several formats.
+ * After conversion the caller provides a save-file dialog via [onRequestSave];
+ * the callback receives the temporary [File] and the MIME type so the caller
+ * can launch [ActivityResultContracts.CreateDocument] and copy the bytes.
+ */
 @Composable
 fun ConverterDialog(
     pdfUri: Uri,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onRequestSave: (File, String) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -114,10 +119,16 @@ fun ConverterDialog(
                                         statusMessage = null
                                         try {
                                             val file = convertPdf(context, pdfUri, fmt)
-                                            shareFile(context, file, fmt.mimeType)
-                                            statusMessage = "Fertig: ${file.name} wird geteilt"
+                                            statusMessage = "Fertig – Speicherort wählen…"
+                                            onRequestSave(file, fmt.mimeType)
                                         } catch (e: Exception) {
-                                            statusMessage = "Fehler: ${e.message}"
+                                            val msg = e.message ?: ""
+                                            statusMessage = if (msg.contains("out of memory", ignoreCase = true) ||
+                                                msg.contains("OutOfMemory", ignoreCase = true)) {
+                                                "Fehler: Nicht genügend Arbeitsspeicher vorhanden. Bitte schließe andere Anwendungen und versuche es erneut mit einem kleineren Dokument."
+                                            } else {
+                                                "Fehler bei der Konvertierung: Das Dokument konnte nicht ins Format ${fmt.label} umgewandelt werden. Bitte versuche es noch einmal."
+                                            }
                                         }
                                         isConverting = false
                                     }
@@ -332,12 +343,3 @@ private fun writeMinimalEpub(file: File, pageImageBytes: ByteArray) {
     }
 }
 
-private fun shareFile(context: Context, file: File, mimeType: String) {
-    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-    val intent = Intent(Intent.ACTION_SEND).apply {
-        type = mimeType
-        putExtra(Intent.EXTRA_STREAM, uri)
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    }
-    context.startActivity(Intent.createChooser(intent, "Datei teilen"))
-}

@@ -33,6 +33,12 @@ fun LinkDialog(
         text = {
             Column {
                 Text(
+                    text = "Klicken Sie auf eine freie Stelle im PDF oder wählen Sie Text aus.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
                     text = "URL",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

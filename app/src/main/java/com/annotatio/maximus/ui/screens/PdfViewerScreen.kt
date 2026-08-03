@@ -4,17 +4,23 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Paint
+import android.net.Uri
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.content.FileProvider
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -41,6 +47,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.toArgb
 import com.annotatio.maximus.model.Annotation
 import com.annotatio.maximus.model.DrawingPath
+import com.annotatio.maximus.model.PageTextContent
 import com.annotatio.maximus.model.PathPoint
 import com.annotatio.maximus.model.AnnotationType
 import com.annotatio.maximus.ui.components.AnnotationCanvas
@@ -71,7 +78,10 @@ import com.annotatio.maximus.ui.components.TableEditorDialog
 import com.annotatio.maximus.ui.components.TablePickerDialog
 import com.annotatio.maximus.ui.components.PdfPageInfo
 import com.annotatio.maximus.ui.components.PdfViewer
+import android.widget.Toast
 import com.annotatio.maximus.ui.components.ToolOptionsPanel
+import com.annotatio.maximus.ui.theme.AppTheme
+import com.annotatio.maximus.ui.theme.LocalAppTheme
 import com.annotatio.maximus.util.GitHubApi
 import com.annotatio.maximus.util.loadToolbarVisibility
 import com.annotatio.maximus.util.saveToolbarVisibility
@@ -80,7 +90,11 @@ import java.io.File
 import java.io.FileOutputStream
 
 @Composable
-fun PdfViewerScreen(viewModel: PdfViewModel) {
+fun PdfViewerScreen(
+    viewModel: PdfViewModel,
+    appTheme: AppTheme = AppTheme.CUPERTINO_MINIMALIST,
+    onAppThemeChange: (AppTheme) -> Unit = {}
+) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
@@ -98,12 +112,20 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
     val saveError by viewModel.saveError.collectAsState()
     val bookmarks by viewModel.bookmarks.collectAsState()
     val pageCount by viewModel.pageCount.collectAsState()
+    val pageTextContents by viewModel.pageTextContents.collectAsState()
+    
+    // Get current page text content
+    val currentPageTextContent = remember(currentPage, pageTextContents) {
+        pageTextContents[currentPage]
+    }
 
     // Gemini sketch dialog state
     var showGeminiSketch by remember { mutableStateOf(false) }
 
     // Signature dialog state
     var showSignatureDialog by remember { mutableStateOf(false) }
+    var signaturePendingPosition by remember { mutableStateOf<Pair<Float, Float>?>(null) }
+    var showImageOrSignatureDialog by remember { mutableStateOf(false) }
 
     // Page management dialogs
     var showDeletePagesDialog by remember { mutableStateOf(false) }
@@ -116,6 +138,7 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
     var showSettings by remember { mutableStateOf(false) }
     var showBugReportDialog by remember { mutableStateOf(false) }
     var isSubmittingBugReport by remember { mutableStateOf(false) }
+    var bugReportResult by remember { mutableStateOf<Result<String>?>(null) }
 
     // Ausgewählte Ebene (Stroke) auf der aktuellen Seite
     var selectedAnnotationId by remember(currentPage) { mutableStateOf<String?>(null) }
@@ -141,6 +164,33 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
     var tablePendingRows by remember { mutableStateOf(3) }
     var tablePendingCols by remember { mutableStateOf(3) }
     var editingTable by remember { mutableStateOf<Annotation.Table?>(null) }
+
+    // Hoisted image bitmap cache — persists across overlay switches so images remain visible
+    val imageBitmapCache = remember { mutableMapOf<String, ImageBitmap?>() }
+    val currentPageAnnotations0 = annotations[currentPage] ?: emptyList()
+    LaunchedEffect(currentPageAnnotations0) {
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            for (img in currentPageAnnotations0.filterIsInstance<Annotation.Image>()) {
+                if (!imageBitmapCache.containsKey(img.uriString)) {
+                    val bitmap = try {
+                        context.contentResolver.openInputStream(Uri.parse(img.uriString))?.use { stream ->
+                            BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                        }
+                    } catch (_: Exception) {
+                        null
+                    }
+                    imageBitmapCache[img.uriString] = bitmap
+                }
+            }
+        }
+    }
+
+    // Lazy page text extraction when page changes or PDF loads
+    LaunchedEffect(currentPage, pdfUri) {
+        if (pdfUri != null) {
+            viewModel.loadPageTextContent(context, currentPage)
+        }
+    }
 
     // Image position pending placement (after picker returns)
     var imagePendingPosition by remember { mutableStateOf<Pair<Float, Float>?>(null) }
@@ -176,6 +226,28 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
 
     // Converter dialog state
     var showConverterDialog by remember { mutableStateOf(false) }
+    // Temp file waiting to be saved after conversion
+    var pendingConvertedFile by remember { mutableStateOf<java.io.File?>(null) }
+    var pendingConvertedMime by remember { mutableStateOf("application/octet-stream") }
+    val converterSaveLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("*/*")
+    ) { uri ->
+        uri?.let { dest ->
+            val src = pendingConvertedFile ?: return@let
+            try {
+                context.contentResolver.openOutputStream(dest)?.use { out ->
+                    src.inputStream().use { it.copyTo(out) }
+                }
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(
+                    context,
+                    "Fehler beim Speichern der Datei: ${e.localizedMessage ?: "Unbekannter Fehler"}. Bitte wähle einen anderen Speicherort.",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+            pendingConvertedFile = null
+        }
+    }
 
     // Translator state
     var showTranslatorDialog by remember { mutableStateOf(false) }
@@ -221,10 +293,20 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
 
     // Save error dialog
     if (saveError != null) {
+        val errorMessage = when {
+            saveError!!.contains("Permission denied", ignoreCase = true) || 
+            saveError!!.contains("EACCES", ignoreCase = true) -> 
+                "Kein Zugriff auf den gewählten Speicherort. Bitte wähle einen anderen Ordner oder erteile der App die nötigen Dateiberechtigungen."
+            saveError!!.contains("No space left on device", ignoreCase = true) || 
+            saveError!!.contains("ENOSPC", ignoreCase = true) ->
+                "Nicht genügend Speicherplatz auf dem Gerät verfügbar. Bitte gib etwas Speicherplatz frei und versuche es erneut."
+            else -> 
+                "Die PDF-Datei konnte nicht gespeichert werden ($saveError). Bitte überprüfe den Speicherort und versuche es noch einmal."
+        }
         AlertDialog(
             onDismissRequest = viewModel::clearSaveError,
             title = { Text("Speichern fehlgeschlagen") },
-            text = { Text(saveError!!) },
+            text = { Text(errorMessage) },
             confirmButton = {
                 TextButton(onClick = viewModel::clearSaveError) {
                     Text("OK")
@@ -412,7 +494,14 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
     if (showConverterDialog && pdfUri != null) {
         ConverterDialog(
             pdfUri = pdfUri!!,
-            onDismiss = { showConverterDialog = false }
+            onDismiss = { showConverterDialog = false },
+            onRequestSave = { file, mime ->
+                pendingConvertedFile = file
+                pendingConvertedMime = mime
+                val ext = file.extension
+                converterSaveLauncher.launch("converted_document.$ext")
+                showConverterDialog = false
+            }
         )
     }
 
@@ -533,14 +622,16 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
     if (isLandscape) {
         // Landscape layout: Toolbar on the left, content on the right
         Row(modifier = Modifier.fillMaxSize()) {
-            // Left panel: Toolbar
-            Column(
-                modifier = Modifier
-                    .weight(0.3f)
-                    .fillMaxHeight()
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(16.dp)
-            ) {
+            // Left panel: Toolbar — background and padding handled per-theme
+            val leftPanelModifier = when (appTheme) {
+                AppTheme.LONGHORN_SLATE ->
+                    Modifier.weight(0.25f).fillMaxHeight()
+                else ->
+                    Modifier.weight(0.3f).fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(16.dp)
+            }
+            Column(modifier = leftPanelModifier) {
                 AnnotationToolbar(
                     activeTool = activeTool,
                     canUndo = canUndo,
@@ -565,6 +656,10 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                     onOpenCreatePdf = { showCreatePdfDialog = true },
                     onOpenPassword = { showPasswordDialog = true },
                     onOpenSearch = { showSearchDialog = true },
+                    onOpenLink = {
+                        linkPosition = Pair(0.1f, 0.1f)
+                        showLinkDialog = true
+                    },
                     onSmartGraphicSelected = { type -> pendingSmartGraphicType = type }
                 )
                 ToolOptionsPanel(
@@ -610,6 +705,7 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                                 showTextNoteDialog = true
                             },
                             onRequestSignature = { x, y ->
+                                signaturePendingPosition = Pair(x, y)
                                 showSignatureDialog = true
                             },
                             onRequestComment = { x, y ->
@@ -625,7 +721,8 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                             },
                             onRequestImage = { x, y ->
                                 imagePendingPosition = Pair(x, y)
-                                imagePickerLauncher.launch("image/*")
+                                signaturePendingPosition = Pair(x, y)
+                                showImageOrSignatureDialog = true
                             },
                             onRequestLink = { x, y ->
                                 linkPosition = Pair(x, y)
@@ -636,7 +733,14 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                                 editingTextBox = null
                                 showTextBoxDialog = true
                             },
+                            onEditTextBox = { textBox ->
+                                editingTextBox = textBox
+                                textBoxPosition = Pair(textBox.x, textBox.y)
+                                showTextBoxDialog = true
+                            },
                             pendingSmartGraphicType = pendingSmartGraphicType,
+                            externalImageCache = imageBitmapCache,
+                            pageTextContent = currentPageTextContent,
                             modifier = Modifier.fillMaxSize()
                         )
                     } else if (activeTool == AnnotationType.SELECT || activeTool == AnnotationType.LASSO) {
@@ -667,6 +771,7 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                             onCopyAnnotation = { annotation ->
                                 copyStrokeToClipboard(context, annotation, pageInfo)
                             },
+                            externalImageCache = imageBitmapCache,
                             modifier = Modifier.fillMaxSize()
                         )
                         // Kommentar-Tap + TextBox-Doppeltipp im Landscape-Modus
@@ -683,6 +788,7 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                                 textBoxPosition = Pair(textBox.x, textBox.y)
                                 showTextBoxDialog = true
                             },
+                            externalImageCache = imageBitmapCache,
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -701,7 +807,9 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                 } else {
                     // Empty state
                     Box(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable { openFileLauncher.launch(arrayOf("application/pdf")) },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -714,36 +822,40 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
             }
         }
     } else {
-        // Portrait layout: Original Scaffold layout
-        Scaffold(
-            topBar = {
-                Column {
-                    AnnotationToolbar(
-                        activeTool = activeTool,
-                        canUndo = canUndo,
-                        canRedo = canRedo,
-                        hasDocument = pdfUri != null,
-                        toolbarVisibility = toolbarVisibility,
-                        onOpenFile = { openFileLauncher.launch(arrayOf("application/pdf")) },
-                        onSettingsClick = { showSettings = true },
-                        onBugReportClick = { showBugReportDialog = true },
-                        onBookmarksClick = { showBookmarkPanel = true },
-                        onToolSelected = viewModel::selectTool,
-                        onUndo = viewModel::undo,
-                        onRedo = viewModel::redo,
-                        onSave = { saveFileLauncher.launch("annotated_document.pdf") },
-                        onOpenGeminiSketch = { showGeminiSketch = true },
-                        onOpenConverter = { showConverterDialog = true },
-                        onOpenTranslator = { showTranslatorDialog = true },
-                        onOpenScanner = { showScannerDialog = true },
-                        onOpenTts = { showTtsDialog = true },
-                        onOpenWifiShare = { showWifiShareDialog = true },
-                        onOpenCloud = { showCloudDialog = true },
-                        onOpenCreatePdf = { showCreatePdfDialog = true },
-                        onOpenPassword = { showPasswordDialog = true },
-                        onOpenSearch = { showSearchDialog = true },
-                        onSmartGraphicSelected = { type -> pendingSmartGraphicType = type }
-                    )
+        // Portrait layout — Cupertino: bottom floating bar; Aero/Slate: top bar
+        val toolbarComposable: @Composable () -> Unit = {
+            Column {
+                AnnotationToolbar(
+                    activeTool = activeTool,
+                    canUndo = canUndo,
+                    canRedo = canRedo,
+                    hasDocument = pdfUri != null,
+                    toolbarVisibility = toolbarVisibility,
+                    onOpenFile = { openFileLauncher.launch(arrayOf("application/pdf")) },
+                    onSettingsClick = { showSettings = true },
+                    onBugReportClick = { showBugReportDialog = true },
+                    onBookmarksClick = { showBookmarkPanel = true },
+                    onToolSelected = viewModel::selectTool,
+                    onUndo = viewModel::undo,
+                    onRedo = viewModel::redo,
+                    onSave = { saveFileLauncher.launch("annotated_document.pdf") },
+                    onOpenGeminiSketch = { showGeminiSketch = true },
+                    onOpenConverter = { showConverterDialog = true },
+                    onOpenTranslator = { showTranslatorDialog = true },
+                    onOpenScanner = { showScannerDialog = true },
+                    onOpenTts = { showTtsDialog = true },
+                    onOpenWifiShare = { showWifiShareDialog = true },
+                    onOpenCloud = { showCloudDialog = true },
+                    onOpenCreatePdf = { showCreatePdfDialog = true },
+                    onOpenPassword = { showPasswordDialog = true },
+                    onOpenSearch = { showSearchDialog = true },
+                    onOpenLink = {
+                        linkPosition = Pair(0.1f, 0.1f)
+                        showLinkDialog = true
+                    },
+                    onSmartGraphicSelected = { type -> pendingSmartGraphicType = type }
+                )
+                if (appTheme != AppTheme.CUPERTINO_MINIMALIST) {
                     ToolOptionsPanel(
                         activeTool = activeTool,
                         selectedColor = penColor,
@@ -753,6 +865,21 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                     )
                 }
             }
+        }
+        Scaffold(
+            topBar    = if (appTheme != AppTheme.CUPERTINO_MINIMALIST) toolbarComposable else { {} },
+            bottomBar = if (appTheme == AppTheme.CUPERTINO_MINIMALIST) ({
+                Column(modifier = Modifier.navigationBarsPadding()) {
+                    ToolOptionsPanel(
+                        activeTool = activeTool,
+                        selectedColor = penColor,
+                        strokeWidth = strokeWidth,
+                        onColorSelected = viewModel::setColor,
+                        onStrokeWidthChanged = viewModel::setStrokeWidth
+                    )
+                    toolbarComposable()
+                }
+            }) else { {} }
         ) { paddingValues ->
             Box(
                 modifier = Modifier
@@ -788,6 +915,7 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                                 showTextNoteDialog = true
                             },
                             onRequestSignature = { x, y ->
+                                signaturePendingPosition = Pair(x, y)
                                 showSignatureDialog = true
                             },
                             onRequestComment = { x, y ->
@@ -803,7 +931,8 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                             },
                             onRequestImage = { x, y ->
                                 imagePendingPosition = Pair(x, y)
-                                imagePickerLauncher.launch("image/*")
+                                signaturePendingPosition = Pair(x, y)
+                                showImageOrSignatureDialog = true
                             },
                             onRequestLink = { x, y ->
                                 linkPosition = Pair(x, y)
@@ -814,7 +943,14 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                                 editingTextBox = null
                                 showTextBoxDialog = true
                             },
+                            onEditTextBox = { textBox ->
+                                editingTextBox = textBox
+                                textBoxPosition = Pair(textBox.x, textBox.y)
+                                showTextBoxDialog = true
+                            },
                             pendingSmartGraphicType = pendingSmartGraphicType,
+                            externalImageCache = imageBitmapCache,
+                            pageTextContent = currentPageTextContent,
                             modifier = Modifier.fillMaxSize()
                         )
                     } else if (activeTool == AnnotationType.SELECT || activeTool == AnnotationType.LASSO) {
@@ -843,6 +979,7 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                                 textBoxPosition = Pair(textBox.x, textBox.y)
                                 showTextBoxDialog = true
                             },
+                            externalImageCache = imageBitmapCache,
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -861,7 +998,9 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                 } else {
                     // Empty state
                     Box(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable { openFileLauncher.launch(arrayOf("application/pdf")) },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -880,7 +1019,7 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
             initialColor = penColor,
             strokeWidth = strokeWidth,
             onDismiss = { showGeminiSketch = false },
-            onSend = { bitmap ->
+            onSend = { bitmap, prompt ->
                 // Persist bitmap to a cache file
                 val cacheDir = File(context.cacheDir, "gemini_sketches").apply { mkdirs() }
                 val file = File(cacheDir, "sketch_${System.currentTimeMillis()}.png")
@@ -894,17 +1033,27 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                     file
                 )
 
-                // Copy image URI to clipboard
+                // Copy image URI and prompt to clipboard
                 val clipboard = context.getSystemService(ClipboardManager::class.java)
-                val clip = ClipData.newUri(context.contentResolver, "Gemini Skizze", uri)
+                val clip = ClipData("Gemini Skizze", arrayOf("image/png", "text/plain"), ClipData.Item(uri)).apply {
+                    addItem(ClipData.Item(prompt))
+                }
                 clipboard?.setPrimaryClip(clip)
 
-                // Share image via chooser so Gemini (oder Browser) ausgewählt werden kann
+                // Share image and prompt text via chooser so Gemini (or other apps) can receive it
                 val sendIntent = Intent(Intent.ACTION_SEND).apply {
                     type = "image/png"
                     putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_TEXT, prompt)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
+                
+                Toast.makeText(
+                    context,
+                    "Der Prompt wurde in die Zwischenablage kopiert!\nBitte fügen Sie ihn in der geöffneten App (z.B. Gemini) ein.",
+                    Toast.LENGTH_LONG
+                ).show()
+
                 val chooser = Intent.createChooser(sendIntent, "Skizze an Gemini senden")
                 context.startActivity(chooser)
 
@@ -925,6 +1074,8 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                 translatorLanguageCode = code
                 saveTargetLanguage(context, code)
             },
+            appTheme = appTheme,
+            onAppThemeChange = onAppThemeChange,
             onDismiss = { showSettings = false }
         )
     }
@@ -932,10 +1083,58 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
     if (showSignatureDialog) {
         SignatureDialog(
             onSignatureCaptured = { bitmap ->
-                // TODO: Handle signature bitmap
+                // Save signature as annotation
+                val tempFile = File(context.cacheDir, "signature_${System.currentTimeMillis()}.png")
+                FileOutputStream(tempFile).use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                }
+                
+                val pos = signaturePendingPosition ?: Pair(0.2f, 0.4f)
+                viewModel.addAnnotation(
+                    Annotation.Signature(
+                        pageIndex = currentPage,
+                        x = pos.first,
+                        y = pos.second,
+                        width = 0.3f,
+                        height = 0.15f,
+                        bitmapData = tempFile.readBytes()
+                    )
+                )
                 showSignatureDialog = false
+                signaturePendingPosition = null
             },
-            onDismiss = { showSignatureDialog = false }
+            onDismiss = {
+                showSignatureDialog = false
+                signaturePendingPosition = null
+            }
+        )
+    }
+
+    if (showImageOrSignatureDialog) {
+        AlertDialog(
+            onDismissRequest = { showImageOrSignatureDialog = false },
+            title = { Text("Bild einfügen") },
+            text = { Text("Möchten Sie ein Bild aus der Galerie auswählen oder eine Unterschrift einfügen?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showImageOrSignatureDialog = false
+                        imagePickerLauncher.launch("image/*")
+                    }
+                ) {
+                    Text("Bild aus Galerie")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showImageOrSignatureDialog = false
+                        showSignatureDialog = true
+                    }
+                ) {
+                    Text("Unterschrift")
+                }
+            }
         )
     }
 
@@ -945,12 +1144,40 @@ fun PdfViewerScreen(viewModel: PdfViewModel) {
                 coroutineScope.launch {
                     isSubmittingBugReport = true
                     val result = GitHubApi.submitBugReport(description)
-                    // TODO: Show result to user
+                    bugReportResult = result
                     isSubmittingBugReport = false
                 }
                 showBugReportDialog = false
             },
             onDismiss = { showBugReportDialog = false }
+        )
+    }
+
+    bugReportResult?.let { result ->
+        AlertDialog(
+            onDismissRequest = { bugReportResult = null },
+            title = { Text(if (result.isSuccess) "Fehlerbericht gesendet" else "Fehler beim Senden") },
+            text = {
+                val msg = if (result.isSuccess) {
+                    "Der Fehlerbericht wurde erfolgreich übermittelt. Vielen Dank für deine Mithilfe zur Verbesserung der App!"
+                } else {
+                    val ex = result.exceptionOrNull()
+                    val errorDetail = ex?.message ?: "Unbekannter Fehler"
+                    if (errorDetail.contains("Unable to resolve host", ignoreCase = true) || 
+                        errorDetail.contains("timeout", ignoreCase = true) || 
+                        errorDetail.contains("Connect", ignoreCase = true)) {
+                        "Der Fehlerbericht konnte nicht gesendet werden. Dies liegt wahrscheinlich an einer fehlenden oder instabilen Internetverbindung.\n\nBitte überprüfe deine Netzwerkverbindung und versuche es erneut."
+                    } else {
+                        "Der Fehlerbericht konnte nicht gesendet werden.\n\nFehlerdetails: $errorDetail\n\nBitte versuche es später noch einmal oder wende dich an den Support."
+                    }
+                }
+                Text(msg)
+            },
+            confirmButton = {
+                TextButton(onClick = { bugReportResult = null }) {
+                    Text("OK")
+                }
+            }
         )
     }
 }

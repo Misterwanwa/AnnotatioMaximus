@@ -1,10 +1,15 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.annotatio.maximus.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -22,7 +27,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.GTranslate
 import androidx.compose.material.icons.filled.ImportExport
-import androidx.compose.material.icons.filled.Lasso
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.ModeComment
 import androidx.compose.material.icons.filled.FormatUnderlined
@@ -41,11 +46,14 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.StickyNote2
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.outlined.Interests
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -60,6 +68,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import com.annotatio.maximus.ui.theme.AppTheme
 
 /**
  * Einträge für die Button-Sichtbarkeit, alphabetisch nach deutschem Label sortiert.
@@ -71,11 +80,11 @@ private val BUTTON_ENTRIES = listOf(
     "createpdf" to Pair("PDF erstellen", Icons.Default.NoteAdd),
     "eraser" to Pair("Radierer", Icons.Default.CleaningServices),
     "gemini" to Pair("KI-Bild", Icons.Default.SmartToy),
+    "hand" to Pair("Hand-Tool (Scrollen)", Icons.Default.PanTool),
     "image" to Pair("Bild", Icons.Default.AddPhotoAlternate),
-    "lasso" to Pair("Lasso", Icons.Default.Lasso),
+    "lasso" to Pair("Lasso", Icons.Default.SelectAll),
     "link" to Pair("Link", Icons.Default.Link),
     "marker" to Pair("Marker", Icons.Default.BorderColor),
-    "note" to Pair("Notiz", Icons.Default.StickyNote2),
     "open" to Pair("Ordner", Icons.Default.FolderOpen),
     "password" to Pair("Passwortschutz", Icons.Default.Lock),
     "pen" to Pair("Stift", Icons.Default.Draw),
@@ -103,6 +112,8 @@ fun SettingsDialog(
     onToolbarVisibilityChange: (Map<String, Boolean>) -> Unit,
     translatorLanguageCode: String = "de",
     onTranslatorLanguageChange: (String) -> Unit = {},
+    appTheme: AppTheme = AppTheme.CUPERTINO_MINIMALIST,
+    onAppThemeChange: (AppTheme) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     var showButtonsSettings by remember { mutableStateOf(false) }
@@ -119,6 +130,32 @@ fun SettingsDialog(
             title = { Text("Einstellungen") },
             text = {
                 Column {
+                    // Theme selector
+                    Text(
+                        text = "Design",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    val themeOptions = listOf(
+                        AppTheme.CUPERTINO_MINIMALIST to "Cupertino",
+                        AppTheme.FRUTIGER_AERO        to "Frutiger Aero",
+                        AppTheme.LONGHORN_SLATE        to "Longhorn Slate"
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        themeOptions.forEach { (theme, label) ->
+                            FilterChip(
+                                selected = appTheme == theme,
+                                onClick = { onAppThemeChange(theme) },
+                                label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+
                     // Translator language
                     LanguagePickerRow(
                         currentCode = translatorLanguageCode,

@@ -45,6 +45,14 @@ private val presetColors = listOf(
     Color(0xFFFFAB00)
 )
 
+private val highlightColors = listOf(
+    Color(0xFFFFEB3B), // Gelb
+    Color(0xFF76FF03), // Grün
+    Color(0xFF40C4FF), // Cyan
+    Color(0xFFFF80AB), // Pink
+    Color(0xFFE040FB)  // Lila
+)
+
 @Composable
 fun ToolOptionsPanel(
     activeTool: AnnotationType?,
@@ -54,7 +62,7 @@ fun ToolOptionsPanel(
     onStrokeWidthChanged: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (activeTool == null || activeTool == AnnotationType.ERASER) return
+    if (activeTool == null || activeTool == AnnotationType.ERASER || activeTool == AnnotationType.HAND) return
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -71,8 +79,9 @@ fun ToolOptionsPanel(
                 .padding(horizontal = 16.dp, vertical = 8.dp)
                 .height(40.dp)
         ) {
-            // Color presets
-            presetColors.forEach { color ->
+            // Color presets (highlight colors for highlighter, standard for everything else)
+            val colors = if (activeTool == AnnotationType.HIGHLIGHTER) highlightColors else presetColors
+            colors.forEach { color ->
                 ColorDot(
                     color = color,
                     isSelected = color == selectedColor,

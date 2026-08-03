@@ -94,7 +94,16 @@ fun WifiShareDialog(
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
-                        statusText = "Fehler: ${e.message}"
+                        val msg = e.message ?: ""
+                        statusText = if (msg.contains("EADDRINUSE", ignoreCase = true) ||
+                            msg.contains("address already in use", ignoreCase = true)) {
+                            "Fehler: Die Netzwerk-Adresse oder der Port ist bereits belegt. Bitte schließe andere Freigaben oder starte das Gerät neu."
+                        } else if (msg.contains("Permission denied", ignoreCase = true) ||
+                            msg.contains("EACCES", ignoreCase = true)) {
+                            "Fehler: Berechtigung verweigert. Bitte überprüfe die Netzwerkeinstellungen deines Geräts."
+                        } else {
+                            "Fehler beim Starten des Freigabe-Servers. Bitte stelle sicher, dass du mit einem aktiven WLAN-Netzwerk verbunden bist."
+                        }
                     }
                 }
             }

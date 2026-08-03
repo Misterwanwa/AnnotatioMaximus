@@ -52,12 +52,12 @@ object PdfAnnotationSaver {
                                 is Annotation.Signature -> {
                                     // TODO: Implement signature drawing
                                 }
-                                is Annotation.Underline -> {
-                                    // TODO: Implement underline drawing
-                                }
-                                is Annotation.Strikethrough -> {
-                                    // TODO: Implement strikethrough drawing
-                                }
+                                is Annotation.Underline -> drawUnderline(
+                                    contentStream, annotation, pageWidth, pageHeight
+                                )
+                                is Annotation.Strikethrough -> drawStrikethrough(
+                                    contentStream, annotation, pageWidth, pageHeight
+                                )
                                 is Annotation.Table -> {
                                     // TODO: Implement table drawing
                                 }
@@ -200,6 +200,46 @@ object PdfAnnotationSaver {
         cs.curveTo(cx - k, cy - r, cx - r, cy - k, cx - r, cy)
         cs.curveTo(cx - r, cy + k, cx - k, cy + r, cx, cy + r)
         cs.fill()
+    }
+
+    private fun drawUnderline(
+        cs: PDPageContentStream,
+        underline: Annotation.Underline,
+        pageWidth: Float,
+        pageHeight: Float
+    ) {
+        val rgb = colorToRgbFloats(underline.color)
+        cs.setStrokingColor(rgb[0], rgb[1], rgb[2])
+        cs.setLineWidth(1.5f)
+        cs.setLineCapStyle(1) // Round cap
+
+        val x = underline.x * pageWidth
+        val y = pageHeight - (underline.y * pageHeight)
+        val w = underline.width * pageWidth
+
+        cs.moveTo(x, y)
+        cs.lineTo(x + w, y)
+        cs.stroke()
+    }
+
+    private fun drawStrikethrough(
+        cs: PDPageContentStream,
+        strikethrough: Annotation.Strikethrough,
+        pageWidth: Float,
+        pageHeight: Float
+    ) {
+        val rgb = colorToRgbFloats(strikethrough.color)
+        cs.setStrokingColor(rgb[0], rgb[1], rgb[2])
+        cs.setLineWidth(1.5f)
+        cs.setLineCapStyle(1) // Round cap
+
+        val x = strikethrough.x * pageWidth
+        val y = pageHeight - (strikethrough.y * pageHeight)
+        val w = strikethrough.width * pageWidth
+
+        cs.moveTo(x, y)
+        cs.lineTo(x + w, y)
+        cs.stroke()
     }
 
     private fun colorToRgbFloats(color: Color): FloatArray {

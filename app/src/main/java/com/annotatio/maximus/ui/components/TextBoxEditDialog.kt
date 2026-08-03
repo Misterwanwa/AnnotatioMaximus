@@ -95,7 +95,7 @@ fun TextBoxEditDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (initial != null) "Textfeld bearbeiten" else "Textfeld einfügen") },
+        title = { Text(if (initial != null) "Schriftgröße ändern" else "Textfeld einfügen") },
         text = {
             Column(
                 modifier = Modifier

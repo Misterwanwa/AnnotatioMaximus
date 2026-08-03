@@ -1,7 +1,9 @@
 package com.annotatio.maximus.ui.components
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -14,6 +16,7 @@ import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -51,6 +54,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -125,6 +129,29 @@ fun ScannerDialog(
         }
     }
 
+    // Camera permission request
+    var cameraPermissionDenied by remember { mutableStateOf(false) }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            cameraPermissionDenied = false
+            takePictureLauncher.launch(photoUri)
+        } else {
+            cameraPermissionDenied = true
+        }
+    }
+
+    fun launchCameraWithPermission() {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
+            == PackageManager.PERMISSION_GRANTED
+        ) {
+            takePictureLauncher.launch(photoUri)
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -158,7 +185,7 @@ fun ScannerDialog(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Button(
-                            onClick = { takePictureLauncher.launch(photoUri) },
+                            onClick = { launchCameraWithPermission() },
                             modifier = Modifier.size(80.dp),
                             shape = CircleShape
                         ) {
@@ -169,11 +196,19 @@ fun ScannerDialog(
                             )
                         }
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            "Kamera antippen, um ein Dokument zu fotografieren",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        if (cameraPermissionDenied) {
+                            Text(
+                                "Kamerazugriff wurde verweigert. Bitte erteilen Sie die Berechtigung in den App-Einstellungen.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        } else {
+                            Text(
+                                "Kamera antippen, um ein Dokument zu fotografieren",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             } else {
@@ -216,6 +251,7 @@ fun ScannerDialog(
                         onClick = {
                             capturedBitmap = null
                             statusText = ""
+                            launchCameraWithPermission()
                         },
                         modifier = Modifier.weight(1f)
                     ) { Text("Neu aufnehmen") }
@@ -262,13 +298,14 @@ private fun CropOverlay(
     onCornersChanged: (List<Offset>) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val density = LocalDensity.current.density
     var draggingIndex by remember { mutableStateOf(-1) }
 
     Box(modifier = modifier) {
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
+                .pointerInput(corners, density) {
                     detectDragGestures(
                         onDragStart = { touchOffset ->
                             // Find the nearest corner handle (within 40 dp = 40 * density px)
@@ -282,6 +319,7 @@ private fun CropOverlay(
                             }
                         },
                         onDrag = { change, _ ->
+                            change.consume()
                             if (draggingIndex >= 0) {
                                 val nx = (change.position.x / size.width).coerceIn(0f, 1f)
                                 val ny = (change.position.y / size.height).coerceIn(0f, 1f)

@@ -2,8 +2,9 @@ package com.annotatio.maximus.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,13 +37,21 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import android.net.Uri
+import android.graphics.BitmapFactory
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import com.annotatio.maximus.model.Annotation
 import com.annotatio.maximus.model.AnnotationType
 import com.annotatio.maximus.model.PathPoint
 import kotlin.math.abs
+import kotlin.math.sqrt
 
 @Composable
 fun SelectLassoOverlay(
@@ -58,6 +67,33 @@ fun SelectLassoOverlay(
     var lassoPoints by remember { mutableStateOf<List<Offset>>(emptyList()) }
     var dragStart by remember { mutableStateOf<Offset?>(null) }
     var moveStart by remember { mutableStateOf<Offset?>(null) }
+    val context = LocalContext.current
+
+    val signatureBitmapCache = remember(annotations) {
+        annotations.filterIsInstance<Annotation.Signature>().associate { sig ->
+            sig.id to try {
+                BitmapFactory.decodeByteArray(sig.bitmapData, 0, sig.bitmapData.size)?.asImageBitmap()
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
+    val imageBitmapCache = remember(annotations) {
+        val cache = mutableMapOf<String, ImageBitmap?>()
+        for (img in annotations.filterIsInstance<Annotation.Image>()) {
+            if (!cache.containsKey(img.uriString)) {
+                cache[img.uriString] = try {
+                    context.contentResolver.openInputStream(Uri.parse(img.uriString))?.use { stream ->
+                        BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+        cache
+    }
 
     // When tool changes, clear selection
     val toolKey = activeTool
@@ -74,39 +110,71 @@ fun SelectLassoOverlay(
 
     val gestureModifier = when (activeTool) {
         AnnotationType.SELECT -> Modifier
-            .pointerInput(annotations, pageInfo) {
-                detectTapGestures { offset ->
-                    val normalized = screenToNorm(offset, pageInfo)
+            .pointerInput(annotations, pageInfo, selectedIds) {
+                // Single unified gesture handler: tap to select, immediate drag to move
+                awaitEachGesture {
+                    val down = awaitFirstDown(pass = PointerEventPass.Main)
+                    val downPos = down.position
+                    val normalized = screenToNorm(downPos, pageInfo)
                     val hit = annotations.findLast { annotation ->
                         annotationContains(annotation, normalized, pageInfo)
                     }
-                    selectedIds = if (hit != null) setOf(hit.id) else emptySet()
-                }
-            }
-            .pointerInput(selectedIds, annotations, pageInfo) {
-                // Drag selected annotations
-                detectDragGestures(
-                    onDragStart = { offset ->
-                        val normalized = screenToNorm(offset, pageInfo)
-                        val hit = annotations.findLast { annotationContains(it, normalized, pageInfo) }
-                        if (hit != null && hit.id in selectedIds) {
-                            moveStart = offset
-                        } else {
-                            moveStart = null
-                        }
-                    },
-                    onDrag = { change, dragAmount ->
-                        change.consume()
-                        if (moveStart != null && selectedIds.isNotEmpty()) {
-                            val dxNorm = dragAmount.x / pageInfo.pageWidth
-                            val dyNorm = dragAmount.y / pageInfo.pageHeight
-                            selectedAnnotations.forEach { annotation ->
-                                onUpdateAnnotation(moveAnnotation(annotation, dxNorm, dyNorm))
+
+                    // Select on down (immediate feedback)
+                    val isMoving = hit != null && hit.id in selectedIds
+                    if (hit != null && hit.id !in selectedIds) {
+                        selectedIds = setOf(hit.id)
+                    }
+
+                    // Now track subsequent pointer events
+                    var isDragging = false
+                    var lastPos = downPos
+                    var accumulatedDx = 0f
+                    var accumulatedDy = 0f
+                    
+                    do {
+                        val event = awaitPointerEvent(pass = PointerEventPass.Main)
+                        val pointer = event.changes.firstOrNull() ?: break
+                        if (!pointer.pressed) break
+
+                        val delta = pointer.position - lastPos
+                        val moved = sqrt(delta.x * delta.x + delta.y * delta.y)
+
+                        if ((isMoving || hit != null && hit.id in selectedIds)) {
+                            isDragging = true
+                            pointer.consume()
+                            
+                            // Accumulate movement
+                            accumulatedDx += delta.x / pageInfo.pageWidth
+                            accumulatedDy += delta.y / pageInfo.pageHeight
+                            
+                            // Update position with accumulated delta
+                            if (moved > 0.5f) {
+                                val currentSelected = annotations.filter { it.id in selectedIds }
+                                currentSelected.forEach { annotation ->
+                                    onUpdateAnnotation(moveAnnotation(annotation, accumulatedDx, accumulatedDy))
+                                }
+                                // Reset accumulation after applying
+                                accumulatedDx = 0f
+                                accumulatedDy = 0f
+                                lastPos = pointer.position
                             }
                         }
-                    },
-                    onDragEnd = { moveStart = null }
-                )
+                    } while (true)
+                    
+                    // Apply any remaining accumulated movement at the end
+                    if (accumulatedDx != 0f || accumulatedDy != 0f) {
+                        val currentSelected = annotations.filter { it.id in selectedIds }
+                        currentSelected.forEach { annotation ->
+                            onUpdateAnnotation(moveAnnotation(annotation, accumulatedDx, accumulatedDy))
+                        }
+                    }
+
+                    // If no drag occurred and nothing was hit, deselect
+                    if (!isDragging && hit == null) {
+                        selectedIds = emptySet()
+                    }
+                }
             }
 
         AnnotationType.LASSO -> Modifier
@@ -147,7 +215,7 @@ fun SelectLassoOverlay(
         ) {
             // Draw all annotations
             for (annotation in annotations) {
-                drawAnnotation(annotation, pageInfo, emptyMap())
+                drawAnnotation(annotation, pageInfo, imageBitmapCache, signatureBitmapCache)
             }
 
             // Draw selection highlight
