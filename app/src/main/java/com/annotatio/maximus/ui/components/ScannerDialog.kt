@@ -34,6 +34,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.RotateLeft
+import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -242,6 +244,51 @@ fun ScannerDialog(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                 }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            val currentBmp = capturedBitmap ?: return@OutlinedButton
+                            val matrix = Matrix().apply { postRotate(-90f) }
+                            capturedBitmap = Bitmap.createBitmap(currentBmp, 0, 0, currentBmp.width, currentBmp.height, matrix, true)
+                            corners = listOf(
+                                Offset(corners[1].y, 1f - corners[1].x),
+                                Offset(corners[2].y, 1f - corners[2].x),
+                                Offset(corners[3].y, 1f - corners[3].x),
+                                Offset(corners[0].y, 1f - corners[0].x)
+                            )
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.RotateLeft, contentDescription = null)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Links drehen")
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            val currentBmp = capturedBitmap ?: return@OutlinedButton
+                            val matrix = Matrix().apply { postRotate(90f) }
+                            capturedBitmap = Bitmap.createBitmap(currentBmp, 0, 0, currentBmp.width, currentBmp.height, matrix, true)
+                            corners = listOf(
+                                Offset(1f - corners[3].y, corners[3].x),
+                                Offset(1f - corners[0].y, corners[0].x),
+                                Offset(1f - corners[1].y, corners[1].x),
+                                Offset(1f - corners[2].y, corners[2].x)
+                            )
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.RotateRight, contentDescription = null)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Rechts drehen")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
