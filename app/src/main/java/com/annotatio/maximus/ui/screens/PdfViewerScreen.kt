@@ -84,6 +84,17 @@ import android.widget.Toast
 import com.annotatio.maximus.ui.components.ToolOptionsPanel
 import com.annotatio.maximus.ui.theme.AppTheme
 import com.annotatio.maximus.ui.theme.LocalAppTheme
+import com.annotatio.maximus.model.AecToolType
+import com.annotatio.maximus.model.DrawingScale
+import com.annotatio.maximus.model.MeasurementItem
+import com.annotatio.maximus.ui.components.AecToolbarMenu
+import com.annotatio.maximus.ui.components.AecScaleDialog
+import com.annotatio.maximus.ui.components.AecTakeoffDialog
+import com.annotatio.maximus.ui.components.CompareMode
+import com.annotatio.maximus.ui.components.PdfComparePalette
+import com.annotatio.maximus.ui.components.PdfCompareViewer
+import com.annotatio.maximus.ui.components.McpServerDialog
+import com.annotatio.maximus.util.AndroidMcpServer
 import com.annotatio.maximus.util.GitHubApi
 import com.annotatio.maximus.util.loadToolbarVisibility
 import com.annotatio.maximus.util.saveToolbarVisibility
@@ -272,6 +283,66 @@ fun PdfViewerScreen(
     var showCloudDialog by remember { mutableStateOf(false) }
     var showCreatePdfDialog by remember { mutableStateOf(false) }
     var showPasswordDialog by remember { mutableStateOf(false) }
+
+    // AEC & Measurement state
+    var isAecModeActive by remember { mutableStateOf(false) }
+    var currentAecTool by remember { mutableStateOf(AecToolType.NONE) }
+    var drawingScale by remember { mutableStateOf(DrawingScale()) }
+    var showAecScaleDialog by remember { mutableStateOf(false) }
+    var showAecTakeoffDialog by remember { mutableStateOf(false) }
+    var takeoffItems by remember { mutableStateOf<List<MeasurementItem>>(emptyList()) }
+
+    // PDF Compare state
+    var showComparePalette by remember { mutableStateOf(false) }
+    var isComparingActive by remember { mutableStateOf(false) }
+    var revisionBUri by remember { mutableStateOf<Uri?>(null) }
+    var compareMode by remember { mutableStateOf(CompareMode.SIDE_BY_SIDE) }
+    var isSyncZoomEnabled by remember { mutableStateOf(true) }
+
+    // MCP Server state
+    var showMcpDialog by remember { mutableStateOf(false) }
+
+    // Connect MCP Server to current document state
+    LaunchedEffect(pdfUri, pageCount, currentPage, pageTextContents, takeoffItems) {
+        AndroidMcpServer.documentInfoProvider = {
+            org.json.JSONObject().apply {
+                put("uri", pdfUri?.toString() ?: "")
+                put("title", pdfUri?.lastPathSegment ?: "Dokument")
+                put("pageCount", pageCount)
+                put("currentPage", currentPage + 1)
+            }
+        }
+        AndroidMcpServer.pageTextProvider = { pageIdx ->
+            pageTextContents[pageIdx]?.textLines?.joinToString("\n") { it.text } ?: "Kein Text auf Seite $pageIdx"
+        }
+        AndroidMcpServer.searchProvider = { query ->
+            val results = org.json.JSONArray()
+            for ((pIdx, content) in pageTextContents) {
+                for (line in content.textLines) {
+                    if (line.text.contains(query, ignoreCase = true)) {
+                        results.put(org.json.JSONObject().apply {
+                            put("page", pIdx + 1)
+                            put("text", line.text)
+                        })
+                    }
+                }
+            }
+            results
+        }
+        AndroidMcpServer.takeoffProvider = { takeoffItems }
+        AndroidMcpServer.addNoteCallback = { pIdx, x, y, text ->
+            viewModel.addAnnotation(
+                Annotation.TextNote(
+                    pageIndex = pIdx,
+                    x = x,
+                    y = y,
+                    text = text,
+                    color = penColor
+                )
+            )
+            true
+        }
+    }
     var showSearchDialog by remember { mutableStateOf(false) }
 
     // File picker (local storage and cloud providers)
@@ -621,6 +692,59 @@ fun PdfViewerScreen(
         )
     }
 
+    // AEC Scale Dialog
+    if (showAecScaleDialog) {
+        AecScaleDialog(
+            currentScale = drawingScale,
+            onScaleChanged = { drawingScale = it },
+            onDismiss = { showAecScaleDialog = false }
+        )
+    }
+
+    // AEC Takeoff Dialog
+    if (showAecTakeoffDialog) {
+        AecTakeoffDialog(
+            items = takeoffItems,
+            onDeleteItem = { id -> takeoffItems = takeoffItems.filterNot { it.id == id } },
+            onClearAll = { takeoffItems = emptyList() },
+            onDismiss = { showAecTakeoffDialog = false }
+        )
+    }
+
+    // PDF Compare Palette Dialog
+    if (showComparePalette) {
+        PdfComparePalette(
+            currentPdfUri = pdfUri,
+            revisionBUri = revisionBUri,
+            activeMode = compareMode,
+            isSyncZoomEnabled = isSyncZoomEnabled,
+            onSelectRevisionB = { revisionBUri = it },
+            onModeChanged = { compareMode = it },
+            onToggleSyncZoom = { isSyncZoomEnabled = it },
+            onStartCompare = { isComparingActive = true },
+            onDismiss = { showComparePalette = false }
+        )
+    }
+
+    // MCP Server Dialog
+    if (showMcpDialog) {
+        McpServerDialog(
+            onDismiss = { showMcpDialog = false }
+        )
+    }
+
+    // Full-screen Revision Comparison View
+    if (isComparingActive && revisionBUri != null) {
+        PdfCompareViewer(
+            uriA = pdfUri,
+            uriB = revisionBUri,
+            mode = compareMode,
+            isSyncZoomEnabled = isSyncZoomEnabled,
+            onClose = { isComparingActive = false }
+        )
+        return
+    }
+
     if (isLandscape) {
         // Landscape layout: Toolbar on the left, content on the right
         Row(modifier = Modifier.fillMaxSize()) {
@@ -662,8 +786,21 @@ fun PdfViewerScreen(
                         linkPosition = Pair(0.1f, 0.1f)
                         showLinkDialog = true
                     },
-                    onSmartGraphicSelected = { type -> pendingSmartGraphicType = type }
+                    onSmartGraphicSelected = { type -> pendingSmartGraphicType = type },
+                    isAecModeActive = isAecModeActive,
+                    onToggleAecMode = { isAecModeActive = !isAecModeActive },
+                    onOpenCompare = { showComparePalette = true },
+                    onOpenMcpServer = { showMcpDialog = true }
                 )
+                if (isAecModeActive) {
+                    AecToolbarMenu(
+                        selectedTool = currentAecTool,
+                        currentScale = drawingScale,
+                        onToolSelected = { currentAecTool = it },
+                        onOpenScaleDialog = { showAecScaleDialog = true },
+                        onOpenTakeoffDialog = { showAecTakeoffDialog = true }
+                    )
+                }
                 ToolOptionsPanel(
                     activeTool = activeTool,
                     selectedColor = penColor,
@@ -855,8 +992,21 @@ fun PdfViewerScreen(
                         linkPosition = Pair(0.1f, 0.1f)
                         showLinkDialog = true
                     },
-                    onSmartGraphicSelected = { type -> pendingSmartGraphicType = type }
+                    onSmartGraphicSelected = { type -> pendingSmartGraphicType = type },
+                    isAecModeActive = isAecModeActive,
+                    onToggleAecMode = { isAecModeActive = !isAecModeActive },
+                    onOpenCompare = { showComparePalette = true },
+                    onOpenMcpServer = { showMcpDialog = true }
                 )
+                if (isAecModeActive) {
+                    AecToolbarMenu(
+                        selectedTool = currentAecTool,
+                        currentScale = drawingScale,
+                        onToolSelected = { currentAecTool = it },
+                        onOpenScaleDialog = { showAecScaleDialog = true },
+                        onOpenTakeoffDialog = { showAecTakeoffDialog = true }
+                    )
+                }
                 if (appTheme != AppTheme.CUPERTINO_MINIMALIST) {
                     ToolOptionsPanel(
                         activeTool = activeTool,

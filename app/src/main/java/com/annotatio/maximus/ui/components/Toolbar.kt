@@ -33,10 +33,12 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Difference
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FormatStrikethrough
 import androidx.compose.material.icons.filled.FormatUnderlined
+import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.GTranslate
 import androidx.compose.material.icons.filled.ImportExport
@@ -128,6 +130,10 @@ fun AnnotationToolbar(
     onSmartGraphicSelected: (com.annotatio.maximus.model.SmartGraphicType) -> Unit = {},
     onToolbarTextBoxSelected: () -> Unit = {},
     onOpenLink: () -> Unit = {},
+    isAecModeActive: Boolean = false,
+    onToggleAecMode: () -> Unit = {},
+    onOpenCompare: () -> Unit = {},
+    onOpenMcpServer: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     when (LocalAppTheme.current) {
@@ -137,7 +143,8 @@ fun AnnotationToolbar(
             onToolSelected, onUndo, onRedo, onSave, onOpenGeminiSketch,
             onOpenConverter, onOpenTranslator, onOpenScanner, onOpenTts,
             onOpenWifiShare, onOpenCloud, onOpenCreatePdf, onOpenPassword,
-            onOpenSearch, onSmartGraphicSelected, onToolbarTextBoxSelected, onOpenLink, modifier
+            onOpenSearch, onSmartGraphicSelected, onToolbarTextBoxSelected, onOpenLink,
+            isAecModeActive, onToggleAecMode, onOpenCompare, onOpenMcpServer, modifier
         )
         AppTheme.FRUTIGER_AERO -> AeroToolbar(
             activeTool, canUndo, canRedo, hasDocument, toolbarVisibility,
@@ -145,7 +152,8 @@ fun AnnotationToolbar(
             onToolSelected, onUndo, onRedo, onSave, onOpenGeminiSketch,
             onOpenConverter, onOpenTranslator, onOpenScanner, onOpenTts,
             onOpenWifiShare, onOpenCloud, onOpenCreatePdf, onOpenPassword,
-            onOpenSearch, onSmartGraphicSelected, onToolbarTextBoxSelected, onOpenLink, modifier
+            onOpenSearch, onSmartGraphicSelected, onToolbarTextBoxSelected, onOpenLink,
+            isAecModeActive, onToggleAecMode, onOpenCompare, onOpenMcpServer, modifier
         )
         AppTheme.LONGHORN_SLATE -> SlateToolbar(
             activeTool, canUndo, canRedo, hasDocument, toolbarVisibility,
@@ -153,7 +161,8 @@ fun AnnotationToolbar(
             onToolSelected, onUndo, onRedo, onSave, onOpenGeminiSketch,
             onOpenConverter, onOpenTranslator, onOpenScanner, onOpenTts,
             onOpenWifiShare, onOpenCloud, onOpenCreatePdf, onOpenPassword,
-            onOpenSearch, onSmartGraphicSelected, onToolbarTextBoxSelected, onOpenLink, modifier
+            onOpenSearch, onSmartGraphicSelected, onToolbarTextBoxSelected, onOpenLink,
+            isAecModeActive, onToggleAecMode, onOpenCompare, onOpenMcpServer, modifier
         )
     }
 }
@@ -190,6 +199,10 @@ private fun CupertinoToolbar(
     onSmartGraphicSelected: (com.annotatio.maximus.model.SmartGraphicType) -> Unit,
     onToolbarTextBoxSelected: () -> Unit,
     onOpenLink: () -> Unit,
+    isAecModeActive: Boolean,
+    onToggleAecMode: () -> Unit,
+    onOpenCompare: () -> Unit,
+    onOpenMcpServer: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Frosted-glass-style background (semi-transparent white)
@@ -314,6 +327,9 @@ private fun CupertinoToolbar(
         if (show("cloud"))      CupertinoIconBtn(Icons.Default.Cloud, "Cloud", onClick = onOpenCloud)
         if (show("createpdf"))  CupertinoIconBtn(Icons.Default.NoteAdd, "PDF erstellen", onClick = onOpenCreatePdf)
         if (show("password"))   CupertinoIconBtn(Icons.Default.Lock, "Passwort", enabled = hasDocument, onClick = onOpenPassword)
+        if (show("aec"))        CupertinoToolToggle(Icons.Default.Straighten, "Plan- & Messwerkzeuge (AEC)", isAecModeActive, hasDocument, onToggleAecMode)
+        if (show("compare"))    CupertinoIconBtn(Icons.Default.Difference, "Revisionsvergleich (PDF Compare)", enabled = hasDocument, onClick = onOpenCompare)
+        if (show("mcp"))        CupertinoIconBtn(Icons.Default.SmartToy, "KI-Schnittstelle (MCP)", onClick = onOpenMcpServer)
 
         CupertinoSeparator()
 
@@ -418,6 +434,10 @@ private fun AeroToolbar(
     onSmartGraphicSelected: (com.annotatio.maximus.model.SmartGraphicType) -> Unit,
     onToolbarTextBoxSelected: () -> Unit,
     onOpenLink: () -> Unit,
+    isAecModeActive: Boolean,
+    onToggleAecMode: () -> Unit,
+    onOpenCompare: () -> Unit,
+    onOpenMcpServer: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // XP title-bar gradient: deep blue at top to mid blue
@@ -560,6 +580,9 @@ private fun AeroToolbar(
             if (show("cloud"))      AeroBtn(Icons.Default.Cloud, "Cloud", onClick = onOpenCloud)
             if (show("createpdf"))  AeroBtn(Icons.Default.NoteAdd, "PDF erstellen", onClick = onOpenCreatePdf)
             if (show("password"))   AeroBtn(Icons.Default.Lock, "Passwort", enabled = hasDocument, onClick = onOpenPassword)
+            if (show("aec"))        AeroToggleBtn(Icons.Default.Straighten, "Plan- & Messwerkzeuge (AEC)", isAecModeActive, hasDocument, onToggleAecMode)
+            if (show("compare"))    AeroBtn(Icons.Default.Difference, "Revisionsvergleich", enabled = hasDocument, onClick = onOpenCompare)
+            if (show("mcp"))        AeroBtn(Icons.Default.SmartToy, "KI-Schnittstelle (MCP)", onClick = onOpenMcpServer)
 
             AeroSeparator()
 
@@ -686,6 +709,10 @@ fun SlateToolbar(
     onSmartGraphicSelected: (com.annotatio.maximus.model.SmartGraphicType) -> Unit,
     onToolbarTextBoxSelected: () -> Unit,
     onOpenLink: () -> Unit,
+    isAecModeActive: Boolean,
+    onToggleAecMode: () -> Unit,
+    onOpenCompare: () -> Unit,
+    onOpenMcpServer: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val configuration = LocalConfiguration.current
@@ -761,6 +788,9 @@ fun SlateToolbar(
             if (show("cloud"))      SlateIconBtn(Icons.Default.Cloud, "Cloud", onClick = onOpenCloud)
             if (show("createpdf"))  SlateIconBtn(Icons.Default.NoteAdd, "PDF erstellen", onClick = onOpenCreatePdf)
             if (show("password"))   SlateIconBtn(Icons.Default.Lock, "Passwort", enabled = hasDocument, onClick = onOpenPassword)
+            if (show("aec"))        SlateToggle(Icons.Default.Straighten, "Plan- & Messwerkzeuge (AEC)", isAecModeActive, hasDocument, onToggleAecMode)
+            if (show("compare"))    SlateIconBtn(Icons.Default.Difference, "Revisionsvergleich", enabled = hasDocument, onClick = onOpenCompare)
+            if (show("mcp"))        SlateIconBtn(Icons.Default.SmartToy, "KI-Schnittstelle (MCP)", onClick = onOpenMcpServer)
             SlateSeparatorH()
             if (show("undo")) SlateIconBtn(Icons.Default.Undo, "Rückgängig", enabled = canUndo, onClick = onUndo)
             if (show("redo")) SlateIconBtn(Icons.Default.Redo, "Wiederholen", enabled = canRedo, onClick = onRedo)
@@ -832,6 +862,9 @@ fun SlateToolbar(
             if (show("cloud"))      SlateIconBtn(Icons.Default.Cloud, "Cloud", onClick = onOpenCloud)
             if (show("createpdf"))  SlateIconBtn(Icons.Default.NoteAdd, "PDF erstellen", onClick = onOpenCreatePdf)
             if (show("password"))   SlateIconBtn(Icons.Default.Lock, "Passwort", enabled = hasDocument, onClick = onOpenPassword)
+            if (show("aec"))        SlateToggle(Icons.Default.Straighten, "Plan- & Messwerkzeuge (AEC)", isAecModeActive, hasDocument, onToggleAecMode)
+            if (show("compare"))    SlateIconBtn(Icons.Default.Difference, "Revisionsvergleich", enabled = hasDocument, onClick = onOpenCompare)
+            if (show("mcp"))        SlateIconBtn(Icons.Default.SmartToy, "KI-Schnittstelle (MCP)", onClick = onOpenMcpServer)
             SlateSeparatorV()
             if (show("undo")) SlateIconBtn(Icons.Default.Undo, "Rückgängig", enabled = canUndo, onClick = onUndo)
             if (show("redo")) SlateIconBtn(Icons.Default.Redo, "Wiederholen", enabled = canRedo, onClick = onRedo)

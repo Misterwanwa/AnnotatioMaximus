@@ -48,6 +48,8 @@ import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.StickyNote2
+import androidx.compose.material.icons.filled.Difference
+import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.outlined.Interests
@@ -74,8 +76,10 @@ import com.annotatio.maximus.ui.theme.AppTheme
  * Einträge für die Button-Sichtbarkeit, alphabetisch nach deutschem Label sortiert.
  */
 private val BUTTON_ENTRIES = listOf(
+    "aec" to Pair("Plan- & Messwerkzeuge (AEC)", Icons.Default.Straighten),
     "cloud" to Pair("Cloud-Speicher", Icons.Default.Cloud),
     "comment" to Pair("Kommentar", Icons.Default.ModeComment),
+    "compare" to Pair("Revisionsvergleich (PDF Compare)", Icons.Default.Difference),
     "converter" to Pair("Konverter", Icons.Default.ImportExport),
     "createpdf" to Pair("PDF erstellen", Icons.Default.NoteAdd),
     "eraser" to Pair("Radierer", Icons.Default.CleaningServices),
@@ -85,6 +89,7 @@ private val BUTTON_ENTRIES = listOf(
     "lasso" to Pair("Lasso", Icons.Default.SelectAll),
     "link" to Pair("Link", Icons.Default.Link),
     "marker" to Pair("Marker", Icons.Default.BorderColor),
+    "mcp" to Pair("KI-Schnittstelle (MCP)", Icons.Default.SmartToy),
     "open" to Pair("Ordner", Icons.Default.FolderOpen),
     "password" to Pair("Passwortschutz", Icons.Default.Lock),
     "pen" to Pair("Stift", Icons.Default.Draw),

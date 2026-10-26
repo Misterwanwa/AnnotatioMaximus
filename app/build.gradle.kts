@@ -68,4 +68,7 @@ dependencies {
 
     // HTTP Client for GitHub API
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Unit Testing
+    testImplementation("junit:junit:4.13.2")
 }

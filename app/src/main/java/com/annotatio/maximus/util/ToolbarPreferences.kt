@@ -35,6 +35,9 @@ private val DEFAULT_VISIBILITY = mapOf(
     "createpdf" to true,
     "password" to true,
     "gemini" to true,
+    "aec" to true,
+    "compare" to true,
+    "mcp" to true,
     "undo" to true,
     "redo" to true,
     "save" to true

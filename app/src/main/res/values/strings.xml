@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AnnotatioMaximus</string>
+
+    <!-- Navigation & Common -->
+    <string name="action_close">Schließen</string>
+    <string name="action_cancel">Abbrechen</string>
+    <string name="action_save">Speichern</string>
+    <string name="action_apply">Übernehmen</string>
+    <string name="action_delete">Löschen</string>
+    <string name="action_export">Exportieren</string>
+    <string name="action_copy">Kopieren</string>
+    <string name="action_reset">Zurücksetzen</string>
+
+    <!-- Tools -->
+    <string name="tool_pen">Stift</string>
+    <string name="tool_highlighter">Textmarker</string>
+    <string name="tool_eraser">Radierer</string>
+    <string name="tool_shapes">Formen</string>
+    <string name="tool_text_box">Textfeld</string>
+    <string name="tool_note">Notiz</string>
+    <string name="tool_signature">Signatur</string>
+    <string name="tool_select">Auswahl</string>
+    <string name="tool_lasso">Lasso</string>
+
+    <!-- AEC & Measurement Tools -->
+    <string name="aec_mode_title">Plan- &amp; Messwerkzeuge (AEC)</string>
+    <string name="aec_mode_description">Professionelle Werkzeuge für Baupläne, Bemaßung, Aufmaß und Revisionswolken</string>
+    <string name="aec_scale_label">Maßstab</string>
+    <string name="aec_scale_calibrate">Maßstab kalibrieren</string>
+    <string name="aec_tool_distance">Strecke messen</string>
+    <string name="aec_tool_area">Fläche messen</string>
+    <string name="aec_tool_count">Zählwerkzeug</string>
+    <string name="aec_tool_cloud">Revisionswolke</string>
+    <string name="aec_tool_callout">Hinweispfeil (Callout)</string>
+    <string name="aec_takeoff_summary">Aufmaß-Stückliste</string>
+    <string name="aec_unit_meters">Meter (m)</string>
+    <string name="aec_unit_cm">Zentimeter (cm)</string>
+    <string name="aec_unit_mm">Millimeter (mm)</string>
+    <string name="aec_unit_feet">Fuß (ft)</string>
+
+    <!-- PDF Compare (Revisionsvergleich) -->
+    <string name="compare_title">Revisionsvergleich</string>
+    <string name="compare_side_by_side">Side-by-Side</string>
+    <string name="compare_overlay_diff">Differenz-Overlay</string>
+    <string name="compare_split_slider">Wisch-Schieberegler</string>
+    <string name="compare_select_revision_b">Zweite Revision wählen…</string>
+    <string name="compare_legend_added">Hinzugefügt (Neu)</string>
+    <string name="compare_legend_removed">Entfernt (Alt)</string>
+    <string name="compare_legend_unchanged">Unverändert</string>
+
+    <!-- AI & MCP Server -->
+    <string name="mcp_server_title">KI-Schnittstelle (MCP Server)</string>
+    <string name="mcp_server_status_running">MCP Server läuft</string>
+    <string name="mcp_server_status_stopped">MCP Server gestoppt</string>
+    <string name="mcp_server_start">Server starten</string>
+    <string name="mcp_server_stop">Server anhalten</string>
+</resources>
