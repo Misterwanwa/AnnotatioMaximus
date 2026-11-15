@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.StickyNote2
+import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.Wifi
@@ -222,7 +223,8 @@ private fun CupertinoToolbar(
     ) {
         val show = { id: String -> toolbarVisibility[id] != false }
 
-        CupertinoIconBtn(Icons.Default.FolderOpen, "PDF öffnen", onClick = onOpenFile)
+        if (show("open"))
+            CupertinoIconBtn(Icons.Default.FolderOpen, "PDF öffnen", onClick = onOpenFile)
         if (show("bookmarks"))
             CupertinoIconBtn(Icons.Default.Bookmark, "Lesezeichen", enabled = hasDocument, onClick = onBookmarksClick)
         CupertinoIconBtn(Icons.Default.Settings, "Einstellungen", onClick = onSettingsClick)
@@ -250,14 +252,22 @@ private fun CupertinoToolbar(
                 onToolSelected(if (activeTool == AnnotationType.STRIKETHROUGH) null else AnnotationType.STRIKETHROUGH)
             }
 
+        if (show("note"))
+            CupertinoToolToggle(Icons.Default.StickyNote2, "Notiz", activeTool == AnnotationType.TEXT_NOTE, hasDocument) {
+                onToolSelected(if (activeTool == AnnotationType.TEXT_NOTE) null else AnnotationType.TEXT_NOTE)
+            }
         if (show("textbox"))
-            CupertinoToolToggle(Icons.Default.TextFields, "Schriftgröße ändern", activeTool == AnnotationType.TEXT_BOX, hasDocument) {
+            CupertinoToolToggle(Icons.Default.TextFields, "Textfeld", activeTool == AnnotationType.TEXT_BOX, hasDocument) {
                 if (activeTool != AnnotationType.TEXT_BOX) onToolbarTextBoxSelected()
                 onToolSelected(if (activeTool == AnnotationType.TEXT_BOX) null else AnnotationType.TEXT_BOX)
             }
         if (show("comment"))
             CupertinoToolToggle(Icons.Default.ModeComment, "Kommentar", activeTool == AnnotationType.COMMENT, hasDocument) {
                 onToolSelected(if (activeTool == AnnotationType.COMMENT) null else AnnotationType.COMMENT)
+            }
+        if (show("table"))
+            CupertinoToolToggle(Icons.Default.TableChart, "Tabelle", activeTool == AnnotationType.TABLE, hasDocument) {
+                onToolSelected(if (activeTool == AnnotationType.TABLE) null else AnnotationType.TABLE)
             }
         if (show("eraser"))
             CupertinoToolToggle(Icons.Default.CleaningServices, "Radierer", activeTool == AnnotationType.ERASER, hasDocument) {
@@ -290,7 +300,9 @@ private fun CupertinoToolbar(
                 onToolSelected(if (activeTool == AnnotationType.IMAGE) null else AnnotationType.IMAGE)
             }
         if (show("link"))
-            CupertinoIconBtn(Icons.Default.Link, "Link", enabled = hasDocument, onClick = onOpenLink)
+            CupertinoToolToggle(Icons.Default.Link, "Link", activeTool == AnnotationType.LINK, hasDocument) {
+                onToolSelected(if (activeTool == AnnotationType.LINK) null else AnnotationType.LINK)
+            }
         if (show("select"))
             CupertinoToolToggle(Icons.Default.NearMe, "Auswählen", activeTool == AnnotationType.SELECT, hasDocument) {
                 onToolSelected(if (activeTool == AnnotationType.SELECT) null else AnnotationType.SELECT)
@@ -477,7 +489,8 @@ private fun AeroToolbar(
         ) {
             val show = { id: String -> toolbarVisibility[id] != false }
 
-            AeroBtn(Icons.Default.FolderOpen, "Öffnen", onClick = onOpenFile)
+            if (show("open"))
+                AeroBtn(Icons.Default.FolderOpen, "Öffnen", onClick = onOpenFile)
             if (show("bookmarks"))
                 AeroBtn(Icons.Default.Bookmark, "Lesezeichen", enabled = hasDocument, onClick = onBookmarksClick)
             AeroBtn(Icons.Default.Settings, "Einstellungen", onClick = onSettingsClick)
@@ -505,14 +518,22 @@ private fun AeroToolbar(
                     onToolSelected(if (activeTool == AnnotationType.STRIKETHROUGH) null else AnnotationType.STRIKETHROUGH)
                 }
 
+            if (show("note"))
+                AeroToggleBtn(Icons.Default.StickyNote2, "Notiz", activeTool == AnnotationType.TEXT_NOTE, hasDocument) {
+                    onToolSelected(if (activeTool == AnnotationType.TEXT_NOTE) null else AnnotationType.TEXT_NOTE)
+                }
             if (show("textbox"))
-                AeroToggleBtn(Icons.Default.TextFields, "Schriftgröße ändern", activeTool == AnnotationType.TEXT_BOX, hasDocument) {
+                AeroToggleBtn(Icons.Default.TextFields, "Textfeld", activeTool == AnnotationType.TEXT_BOX, hasDocument) {
                     if (activeTool != AnnotationType.TEXT_BOX) onToolbarTextBoxSelected()
                     onToolSelected(if (activeTool == AnnotationType.TEXT_BOX) null else AnnotationType.TEXT_BOX)
                 }
             if (show("comment"))
                 AeroToggleBtn(Icons.Default.ModeComment, "Kommentar", activeTool == AnnotationType.COMMENT, hasDocument) {
                     onToolSelected(if (activeTool == AnnotationType.COMMENT) null else AnnotationType.COMMENT)
+                }
+            if (show("table"))
+                AeroToggleBtn(Icons.Default.TableChart, "Tabelle", activeTool == AnnotationType.TABLE, hasDocument) {
+                    onToolSelected(if (activeTool == AnnotationType.TABLE) null else AnnotationType.TABLE)
                 }
             if (show("eraser"))
                 AeroToggleBtn(Icons.Default.CleaningServices, "Radierer", activeTool == AnnotationType.ERASER, hasDocument) {
@@ -543,7 +564,10 @@ private fun AeroToolbar(
                 AeroToggleBtn(Icons.Default.AddPhotoAlternate, "Bild", activeTool == AnnotationType.IMAGE, hasDocument) {
                     onToolSelected(if (activeTool == AnnotationType.IMAGE) null else AnnotationType.IMAGE)
                 }
-            if (show("link"))     AeroBtn(Icons.Default.Link, "Link", enabled = hasDocument, onClick = onOpenLink)
+            if (show("link"))
+                AeroToggleBtn(Icons.Default.Link, "Link", activeTool == AnnotationType.LINK, hasDocument) {
+                    onToolSelected(if (activeTool == AnnotationType.LINK) null else AnnotationType.LINK)
+                }
             if (show("select"))
                 AeroToggleBtn(Icons.Default.NearMe, "Auswählen", activeTool == AnnotationType.SELECT, hasDocument) {
                     onToolSelected(if (activeTool == AnnotationType.SELECT) null else AnnotationType.SELECT)
@@ -735,7 +759,7 @@ fun SlateToolbar(
             verticalArrangement = Arrangement.spacedBy(2.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            SlateIconBtn(Icons.Default.FolderOpen, "Öffnen", onClick = onOpenFile)
+            if (show("open")) SlateIconBtn(Icons.Default.FolderOpen, "Öffnen", onClick = onOpenFile)
             if (show("bookmarks")) SlateIconBtn(Icons.Default.Bookmark, "Lesezeichen", enabled = hasDocument, onClick = onBookmarksClick)
             SlateIconBtn(Icons.Default.Settings, "Einstellungen", onClick = onSettingsClick)
             SlateSeparatorH()
@@ -745,8 +769,10 @@ fun SlateToolbar(
             if (show("underline"))    SlateToggle(Icons.Default.FormatUnderlined, "Unterstreichen", activeTool == AnnotationType.UNDERLINE, hasDocument) { onToolSelected(if (activeTool == AnnotationType.UNDERLINE) null else AnnotationType.UNDERLINE) }
             if (show("strikethrough"))SlateToggle(Icons.Default.FormatStrikethrough, "Durchstreichen", activeTool == AnnotationType.STRIKETHROUGH, hasDocument) { onToolSelected(if (activeTool == AnnotationType.STRIKETHROUGH) null else AnnotationType.STRIKETHROUGH) }
 
+            if (show("note"))         SlateToggle(Icons.Default.StickyNote2, "Notiz", activeTool == AnnotationType.TEXT_NOTE, hasDocument) { onToolSelected(if (activeTool == AnnotationType.TEXT_NOTE) null else AnnotationType.TEXT_NOTE) }
             if (show("textbox"))      SlateToggle(Icons.Default.TextFields, "Textfeld", activeTool == AnnotationType.TEXT_BOX, hasDocument) { if (activeTool != AnnotationType.TEXT_BOX) onToolbarTextBoxSelected(); onToolSelected(if (activeTool == AnnotationType.TEXT_BOX) null else AnnotationType.TEXT_BOX) }
             if (show("comment"))      SlateToggle(Icons.Default.ModeComment, "Kommentar", activeTool == AnnotationType.COMMENT, hasDocument) { onToolSelected(if (activeTool == AnnotationType.COMMENT) null else AnnotationType.COMMENT) }
+            if (show("table"))        SlateToggle(Icons.Default.TableChart, "Tabelle", activeTool == AnnotationType.TABLE, hasDocument) { onToolSelected(if (activeTool == AnnotationType.TABLE) null else AnnotationType.TABLE) }
             if (show("eraser"))       SlateToggle(Icons.Default.CleaningServices, "Radierer", activeTool == AnnotationType.ERASER, hasDocument) { onToolSelected(if (activeTool == AnnotationType.ERASER) null else AnnotationType.ERASER) }
             if (show("shapes")) {
                 var showMenu by remember { mutableStateOf(false) }
@@ -765,7 +791,7 @@ fun SlateToolbar(
             }
             if (show("signature"))    SlateToggle(Icons.Default.Gesture, "Unterschrift", activeTool == AnnotationType.SIGNATURE, hasDocument) { onToolSelected(if (activeTool == AnnotationType.SIGNATURE) null else AnnotationType.SIGNATURE) }
             if (show("image"))        SlateToggle(Icons.Default.AddPhotoAlternate, "Bild", activeTool == AnnotationType.IMAGE, hasDocument) { onToolSelected(if (activeTool == AnnotationType.IMAGE) null else AnnotationType.IMAGE) }
-            if (show("link"))         SlateIconBtn(Icons.Default.Link, "Link", enabled = hasDocument, onClick = onOpenLink)
+            if (show("link"))         SlateToggle(Icons.Default.Link, "Link", activeTool == AnnotationType.LINK, hasDocument) { onToolSelected(if (activeTool == AnnotationType.LINK) null else AnnotationType.LINK) }
             if (show("select"))       SlateToggle(Icons.Default.NearMe, "Auswählen", activeTool == AnnotationType.SELECT, hasDocument) { onToolSelected(if (activeTool == AnnotationType.SELECT) null else AnnotationType.SELECT) }
             if (show("lasso"))        SlateToggle(Icons.Default.SelectAll, "Lasso", activeTool == AnnotationType.LASSO, hasDocument) { onToolSelected(if (activeTool == AnnotationType.LASSO) null else AnnotationType.LASSO) }
             if (show("smartgraphic")) {
@@ -809,7 +835,7 @@ fun SlateToolbar(
                 .padding(horizontal = 6.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            SlateIconBtn(Icons.Default.FolderOpen, "Öffnen", onClick = onOpenFile)
+            if (show("open")) SlateIconBtn(Icons.Default.FolderOpen, "Öffnen", onClick = onOpenFile)
             if (show("bookmarks")) SlateIconBtn(Icons.Default.Bookmark, "Lesezeichen", enabled = hasDocument, onClick = onBookmarksClick)
             SlateIconBtn(Icons.Default.Settings, "Einstellungen", onClick = onSettingsClick)
             SlateSeparatorV()
@@ -819,8 +845,10 @@ fun SlateToolbar(
             if (show("underline"))    SlateToggle(Icons.Default.FormatUnderlined, "Unterstreichen", activeTool == AnnotationType.UNDERLINE, hasDocument) { onToolSelected(if (activeTool == AnnotationType.UNDERLINE) null else AnnotationType.UNDERLINE) }
             if (show("strikethrough"))SlateToggle(Icons.Default.FormatStrikethrough, "Durchstreichen", activeTool == AnnotationType.STRIKETHROUGH, hasDocument) { onToolSelected(if (activeTool == AnnotationType.STRIKETHROUGH) null else AnnotationType.STRIKETHROUGH) }
 
+            if (show("note"))         SlateToggle(Icons.Default.StickyNote2, "Notiz", activeTool == AnnotationType.TEXT_NOTE, hasDocument) { onToolSelected(if (activeTool == AnnotationType.TEXT_NOTE) null else AnnotationType.TEXT_NOTE) }
             if (show("textbox"))      SlateToggle(Icons.Default.TextFields, "Textfeld", activeTool == AnnotationType.TEXT_BOX, hasDocument) { if (activeTool != AnnotationType.TEXT_BOX) onToolbarTextBoxSelected(); onToolSelected(if (activeTool == AnnotationType.TEXT_BOX) null else AnnotationType.TEXT_BOX) }
             if (show("comment"))      SlateToggle(Icons.Default.ModeComment, "Kommentar", activeTool == AnnotationType.COMMENT, hasDocument) { onToolSelected(if (activeTool == AnnotationType.COMMENT) null else AnnotationType.COMMENT) }
+            if (show("table"))        SlateToggle(Icons.Default.TableChart, "Tabelle", activeTool == AnnotationType.TABLE, hasDocument) { onToolSelected(if (activeTool == AnnotationType.TABLE) null else AnnotationType.TABLE) }
             if (show("eraser"))       SlateToggle(Icons.Default.CleaningServices, "Radierer", activeTool == AnnotationType.ERASER, hasDocument) { onToolSelected(if (activeTool == AnnotationType.ERASER) null else AnnotationType.ERASER) }
             if (show("shapes")) {
                 var showMenu by remember { mutableStateOf(false) }
@@ -839,7 +867,7 @@ fun SlateToolbar(
             }
             if (show("signature"))    SlateToggle(Icons.Default.Gesture, "Unterschrift", activeTool == AnnotationType.SIGNATURE, hasDocument) { onToolSelected(if (activeTool == AnnotationType.SIGNATURE) null else AnnotationType.SIGNATURE) }
             if (show("image"))        SlateToggle(Icons.Default.AddPhotoAlternate, "Bild", activeTool == AnnotationType.IMAGE, hasDocument) { onToolSelected(if (activeTool == AnnotationType.IMAGE) null else AnnotationType.IMAGE) }
-            if (show("link"))         SlateIconBtn(Icons.Default.Link, "Link", enabled = hasDocument, onClick = onOpenLink)
+            if (show("link"))         SlateToggle(Icons.Default.Link, "Link", activeTool == AnnotationType.LINK, hasDocument) { onToolSelected(if (activeTool == AnnotationType.LINK) null else AnnotationType.LINK) }
             if (show("select"))       SlateToggle(Icons.Default.NearMe, "Auswählen", activeTool == AnnotationType.SELECT, hasDocument) { onToolSelected(if (activeTool == AnnotationType.SELECT) null else AnnotationType.SELECT) }
             if (show("lasso"))        SlateToggle(Icons.Default.SelectAll, "Lasso", activeTool == AnnotationType.LASSO, hasDocument) { onToolSelected(if (activeTool == AnnotationType.LASSO) null else AnnotationType.LASSO) }
             if (show("smartgraphic")) {

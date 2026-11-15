@@ -14,18 +14,56 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DocumentScanner
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.NoteAdd
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -45,8 +83,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.text.input.KeyboardType
 import com.annotatio.maximus.model.Annotation
 import com.annotatio.maximus.model.DrawingPath
 import com.annotatio.maximus.model.PageTextContent
@@ -63,7 +103,6 @@ import com.annotatio.maximus.ui.components.TranslatorDialog
 import com.annotatio.maximus.ui.components.loadTargetLanguage
 import com.annotatio.maximus.ui.components.saveTargetLanguage
 import com.annotatio.maximus.ui.components.AnnotationDisplayOverlay
-import com.annotatio.maximus.ui.components.AnnotationLayerOverlay
 import com.annotatio.maximus.ui.components.BookmarkPanel
 import com.annotatio.maximus.ui.components.BugReportDialog
 import com.annotatio.maximus.ui.components.CloudStorageDialog
@@ -87,15 +126,19 @@ import com.annotatio.maximus.ui.theme.LocalAppTheme
 import com.annotatio.maximus.model.AecToolType
 import com.annotatio.maximus.model.DrawingScale
 import com.annotatio.maximus.model.MeasurementItem
+import com.annotatio.maximus.model.MeasurementType
 import com.annotatio.maximus.ui.components.AecToolbarMenu
 import com.annotatio.maximus.ui.components.AecScaleDialog
 import com.annotatio.maximus.ui.components.AecTakeoffDialog
+import com.annotatio.maximus.ui.components.Bookmark
 import com.annotatio.maximus.ui.components.CompareMode
 import com.annotatio.maximus.ui.components.PdfComparePalette
 import com.annotatio.maximus.ui.components.PdfCompareViewer
 import com.annotatio.maximus.ui.components.McpServerDialog
 import com.annotatio.maximus.util.AndroidMcpServer
+import com.annotatio.maximus.util.FileUtils
 import com.annotatio.maximus.util.GitHubApi
+import com.annotatio.maximus.util.MeasureCalculator
 import com.annotatio.maximus.util.loadToolbarVisibility
 import com.annotatio.maximus.util.saveToolbarVisibility
 import com.annotatio.maximus.viewmodel.PdfViewModel
@@ -123,9 +166,20 @@ fun PdfViewerScreen(
     val canRedo by viewModel.canRedo.collectAsState()
     val isSaving by viewModel.isSaving.collectAsState()
     val saveError by viewModel.saveError.collectAsState()
+    val saveSuccess by viewModel.saveSuccess.collectAsState()
     val bookmarks by viewModel.bookmarks.collectAsState()
     val pageCount by viewModel.pageCount.collectAsState()
     val pageTextContents by viewModel.pageTextContents.collectAsState()
+    val drawingScale by viewModel.drawingScale.collectAsState()
+    val takeoffItems by viewModel.takeoffItems.collectAsState()
+    val lastMeasuredPixelLength by viewModel.lastMeasuredPixelLength.collectAsState()
+
+    LaunchedEffect(saveSuccess) {
+        if (saveSuccess) {
+            Toast.makeText(context, "PDF erfolgreich gespeichert", Toast.LENGTH_SHORT).show()
+            viewModel.clearSaveSuccess()
+        }
+    }
     
     // Get current page text content
     val currentPageTextContent = remember(currentPage, pageTextContents) {
@@ -153,9 +207,6 @@ fun PdfViewerScreen(
     var isSubmittingBugReport by remember { mutableStateOf(false) }
     var bugReportResult by remember { mutableStateOf<Result<String>?>(null) }
 
-    // Ausgewählte Ebene (Stroke) auf der aktuellen Seite
-    var selectedAnnotationId by remember(currentPage) { mutableStateOf<String?>(null) }
-
     // Page info from PDF viewer
     var pageInfo by remember { mutableStateOf(PdfPageInfo()) }
 
@@ -163,6 +214,12 @@ fun PdfViewerScreen(
     var showTextNoteDialog by remember { mutableStateOf(false) }
     var textNotePosition by remember { mutableStateOf(Pair(0f, 0f)) }
     var textNoteInput by remember { mutableStateOf("") }
+    var editingTextNote by remember { mutableStateOf<Annotation.TextNote?>(null) }
+
+    // HUD state
+    var isFocusMode by remember { mutableStateOf(false) }
+    var showJumpToPageDialog by remember { mutableStateOf(false) }
+    var jumpPageInput by remember { mutableStateOf("") }
 
     // Comment dialog state
     var showCommentDialog by remember { mutableStateOf(false) }
@@ -287,10 +344,53 @@ fun PdfViewerScreen(
     // AEC & Measurement state
     var isAecModeActive by remember { mutableStateOf(false) }
     var currentAecTool by remember { mutableStateOf(AecToolType.NONE) }
-    var drawingScale by remember { mutableStateOf(DrawingScale()) }
     var showAecScaleDialog by remember { mutableStateOf(false) }
     var showAecTakeoffDialog by remember { mutableStateOf(false) }
-    var takeoffItems by remember { mutableStateOf<List<MeasurementItem>>(emptyList()) }
+    var pendingAreaPoints by remember(currentPage, isAecModeActive, currentAecTool) {
+        mutableStateOf<List<Offset>>(emptyList())
+    }
+    var pendingCalloutPoints by remember { mutableStateOf<Pair<Offset, Offset>?>(null) }
+    var calloutInput by remember { mutableStateOf("") }
+
+    val completeAreaPolygon: () -> Unit = {
+        if (pendingAreaPoints.size >= 3) {
+            val realArea = MeasureCalculator.calculatePolygonArea(
+                pendingAreaPoints,
+                pageInfo.pdfPointWidth,
+                pageInfo.pdfPointHeight,
+                drawingScale
+            )
+            val realPerim = MeasureCalculator.calculatePerimeter(
+                pendingAreaPoints,
+                pageInfo.pdfPointWidth,
+                pageInfo.pdfPointHeight,
+                drawingScale
+            )
+            val areaStr = MeasureCalculator.formatMeasurement(
+                MeasurementType.AREA,
+                realArea,
+                drawingScale.unit
+            )
+            val perimStr = MeasureCalculator.formatMeasurement(
+                MeasurementType.PERIMETER,
+                realPerim,
+                drawingScale.unit
+            )
+            val combinedLabel = "$areaStr (U: $perimStr)"
+            viewModel.addTakeoffItem(
+                MeasurementItem(
+                    pageIndex = currentPage,
+                    type = MeasurementType.AREA,
+                    points = pendingAreaPoints,
+                    calculatedValue = realArea,
+                    unit = drawingScale.unit,
+                    formattedText = combinedLabel,
+                    label = combinedLabel
+                )
+            )
+            pendingAreaPoints = emptyList()
+        }
+    }
 
     // PDF Compare state
     var showComparePalette by remember { mutableStateOf(false) }
@@ -342,6 +442,15 @@ fun PdfViewerScreen(
             )
             true
         }
+        AndroidMcpServer.setScaleCallback = { rawInput ->
+            val calibrated = MeasureCalculator.calibrateScale(
+                pixelLength = viewModel.lastMeasuredPixelLength.value,
+                rawInput = rawInput,
+                currentScale = viewModel.drawingScale.value
+            )
+            viewModel.setDrawingScale(calibrated)
+            true
+        }
     }
     var showSearchDialog by remember { mutableStateOf(false) }
 
@@ -350,9 +459,11 @@ fun PdfViewerScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let {
-            context.contentResolver.takePersistableUriPermission(
-                it, Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    it, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: Exception) {}
             viewModel.openPdf(it, context)
         }
     }
@@ -388,14 +499,15 @@ fun PdfViewerScreen(
         )
     }
 
-    // Text note dialog
+    // Text note dialog (create or edit)
     if (showTextNoteDialog) {
         AlertDialog(
             onDismissRequest = {
                 showTextNoteDialog = false
                 textNoteInput = ""
+                editingTextNote = null
             },
-            title = { Text("Notiz hinzufügen") },
+            title = { Text(if (editingTextNote != null) "Notiz bearbeiten" else "Notiz hinzufügen") },
             text = {
                 TextField(
                     value = textNoteInput,
@@ -407,22 +519,28 @@ fun PdfViewerScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
+                        val existing = editingTextNote
                         if (textNoteInput.isNotBlank()) {
-                            viewModel.addAnnotation(
-                                Annotation.TextNote(
-                                    pageIndex = currentPage,
-                                    x = textNotePosition.first,
-                                    y = textNotePosition.second,
-                                    text = textNoteInput,
-                                    color = penColor
+                            if (existing != null) {
+                                viewModel.updateAnnotation(existing.copy(text = textNoteInput))
+                            } else {
+                                viewModel.addAnnotation(
+                                    Annotation.TextNote(
+                                        pageIndex = currentPage,
+                                        x = textNotePosition.first,
+                                        y = textNotePosition.second,
+                                        text = textNoteInput,
+                                        color = penColor
+                                    )
                                 )
-                            )
+                            }
                         }
                         showTextNoteDialog = false
                         textNoteInput = ""
+                        editingTextNote = null
                     }
                 ) {
-                    Text("Hinzufügen")
+                    Text(if (editingTextNote != null) "Speichern" else "Hinzufügen")
                 }
             },
             dismissButton = {
@@ -430,6 +548,59 @@ fun PdfViewerScreen(
                     onClick = {
                         showTextNoteDialog = false
                         textNoteInput = ""
+                        editingTextNote = null
+                    }
+                ) {
+                    Text("Abbrechen")
+                }
+            }
+        )
+    }
+
+    // Callout text input dialog (AEC)
+    pendingCalloutPoints?.let { pts ->
+        AlertDialog(
+            onDismissRequest = {
+                pendingCalloutPoints = null
+                calloutInput = ""
+            },
+            title = { Text("Callout-Beschriftung") },
+            text = {
+                OutlinedTextField(
+                    value = calloutInput,
+                    onValueChange = { calloutInput = it },
+                    label = { Text("Hinweis / Detailtext") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val label = calloutInput.trim().ifBlank { "Callout" }
+                        viewModel.addTakeoffItem(
+                            MeasurementItem(
+                                pageIndex = currentPage,
+                                type = MeasurementType.CALLOUT,
+                                points = listOf(pts.first, pts.second),
+                                calculatedValue = 0f,
+                                unit = "",
+                                formattedText = label,
+                                label = label
+                            )
+                        )
+                        pendingCalloutPoints = null
+                        calloutInput = ""
+                    }
+                ) {
+                    Text("Übernehmen")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        pendingCalloutPoints = null
+                        calloutInput = ""
                     }
                 ) {
                     Text("Abbrechen")
@@ -696,7 +867,7 @@ fun PdfViewerScreen(
     if (showAecScaleDialog) {
         AecScaleDialog(
             currentScale = drawingScale,
-            onScaleChanged = { drawingScale = it },
+            onScaleChanged = viewModel::setDrawingScale,
             onDismiss = { showAecScaleDialog = false }
         )
     }
@@ -705,8 +876,8 @@ fun PdfViewerScreen(
     if (showAecTakeoffDialog) {
         AecTakeoffDialog(
             items = takeoffItems,
-            onDeleteItem = { id -> takeoffItems = takeoffItems.filterNot { it.id == id } },
-            onClearAll = { takeoffItems = emptyList() },
+            onDeleteItem = viewModel::removeTakeoffItem,
+            onClearAll = viewModel::clearTakeoffItems,
             onDismiss = { showAecTakeoffDialog = false }
         )
     }
@@ -745,259 +916,238 @@ fun PdfViewerScreen(
         return
     }
 
+    val isCurrentPageBookmarked = bookmarks.any { it.pageIndex == currentPage }
+    val onToggleBookmark: () -> Unit = {
+        val existing = bookmarks.firstOrNull { it.pageIndex == currentPage }
+        if (existing != null) {
+            viewModel.removeBookmark(context, existing)
+            Toast.makeText(context, "Lesezeichen entfernt", Toast.LENGTH_SHORT).show()
+        } else {
+            viewModel.addBookmark(
+                context,
+                Bookmark(pageIndex = currentPage, label = "Seite ${currentPage + 1}")
+            )
+            Toast.makeText(context, "Lesezeichen gesetzt (Seite ${currentPage + 1})", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val viewportContent: @Composable () -> Unit = {
+        PdfDocumentViewport(
+            pdfUri = pdfUri,
+            currentPage = currentPage,
+            pageCount = pageCount,
+            pageInfo = pageInfo,
+            activeTool = activeTool,
+            penColor = penColor,
+            strokeWidth = strokeWidth,
+            annotations = annotations,
+            takeoffItems = takeoffItems,
+            drawingScale = drawingScale,
+            isAecModeActive = isAecModeActive,
+            currentAecTool = currentAecTool,
+            lastMeasuredPixelLength = lastMeasuredPixelLength,
+            pendingAreaPoints = pendingAreaPoints,
+            pendingSmartGraphicType = pendingSmartGraphicType,
+            currentPageTextContent = currentPageTextContent,
+            imageBitmapCache = imageBitmapCache,
+            isSaving = isSaving,
+            isFocusMode = isFocusMode,
+            isBookmarked = isCurrentPageBookmarked,
+            onPageChanged = { p, c -> viewModel.onPageChanged(p, c, context) },
+            onPageInfoUpdated = { pageInfo = it },
+            onSelectTool = viewModel::selectTool,
+            onClearAecTool = { currentAecTool = AecToolType.NONE },
+            onAddAnnotation = viewModel::addAnnotation,
+            onRemoveAnnotation = viewModel::removeAnnotation,
+            onUpdateAnnotations = viewModel::updateAnnotations,
+            onRemoveAnnotations = viewModel::removeAnnotations,
+            onDuplicateAnnotations = { viewModel.duplicateAnnotations(it) },
+            onCopyAnnotation = { copyStrokeToClipboard(context, it, pageInfo) },
+            onAreaPointAdded = { pendingAreaPoints = pendingAreaPoints + it },
+            onUndoAreaPoint = { pendingAreaPoints = pendingAreaPoints.dropLast(1) },
+            onCompleteAreaPolygon = completeAreaPolygon,
+            onAddTakeoffItem = viewModel::addTakeoffItem,
+            onRemoveTakeoffItem = viewModel::removeTakeoffItem,
+            onMeasuredPixelLength = viewModel::setLastMeasuredPixelLength,
+            onRequestTextNote = { x, y ->
+                textNotePosition = Pair(x, y)
+                editingTextNote = null
+                textNoteInput = ""
+                showTextNoteDialog = true
+            },
+            onEditTextNote = { note ->
+                editingTextNote = note
+                textNoteInput = note.text
+                textNotePosition = Pair(note.x, note.y)
+                showTextNoteDialog = true
+            },
+            onRequestSignature = { x, y ->
+                signaturePendingPosition = Pair(x, y)
+                showSignatureDialog = true
+            },
+            onRequestComment = { x, y ->
+                commentPosition = Pair(x, y)
+                commentInput = ""
+                editingComment = null
+                showCommentDialog = true
+            },
+            onEditComment = { comment ->
+                editingComment = comment
+                commentInput = comment.text
+                showCommentDialog = true
+            },
+            onRequestTable = { x, y ->
+                tablePosition = Pair(x, y)
+                editingTable = null
+                showTablePicker = true
+            },
+            onEditTable = { table ->
+                editingTable = table
+                tablePosition = Pair(table.x, table.y)
+                showTableEditor = true
+            },
+            onRequestImage = { x, y ->
+                imagePendingPosition = Pair(x, y)
+                signaturePendingPosition = Pair(x, y)
+                showImageOrSignatureDialog = true
+            },
+            onRequestLink = { x, y ->
+                linkPosition = Pair(x, y)
+                showLinkDialog = true
+            },
+            onOpenUrl = { rawUrl ->
+                val targetUrl = if (rawUrl.startsWith("http://", ignoreCase = true) ||
+                    rawUrl.startsWith("https://", ignoreCase = true)
+                ) rawUrl else "https://$rawUrl"
+                try {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)))
+                } catch (_: Exception) {
+                    Toast.makeText(context, "Link konnte nicht geöffnet werden", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onRequestTextBox = { x, y ->
+                textBoxPosition = Pair(x, y)
+                editingTextBox = null
+                showTextBoxDialog = true
+            },
+            onEditTextBox = { textBox ->
+                editingTextBox = textBox
+                textBoxPosition = Pair(textBox.x, textBox.y)
+                showTextBoxDialog = true
+            },
+            onRequestCallout = { s, e ->
+                pendingCalloutPoints = s to e
+                calloutInput = ""
+            },
+            onNavigateToPage = { viewModel.navigateToPage(it) },
+            onOpenJumpToPage = {
+                jumpPageInput = "${currentPage + 1}"
+                showJumpToPageDialog = true
+            },
+            onToggleBookmark = onToggleBookmark,
+            onToggleFocusMode = { isFocusMode = !isFocusMode },
+            onOpenFile = { openFileLauncher.launch(arrayOf("application/pdf")) },
+            onOpenSamplePdf = { viewModel.openSamplePdf(context) },
+            onOpenCreatePdf = { showCreatePdfDialog = true },
+            onOpenScanner = { showScannerDialog = true },
+            modifier = Modifier.fillMaxSize()
+        )
+    }
+
+    val renderToolbar: @Composable () -> Unit = {
+        AnnotationToolbar(
+            activeTool = activeTool,
+            canUndo = canUndo,
+            canRedo = canRedo,
+            hasDocument = pdfUri != null,
+            toolbarVisibility = toolbarVisibility,
+            onOpenFile = { openFileLauncher.launch(arrayOf("application/pdf")) },
+            onSettingsClick = { showSettings = true },
+            onBugReportClick = { showBugReportDialog = true },
+            onBookmarksClick = { showBookmarkPanel = true },
+            onToolSelected = viewModel::selectTool,
+            onUndo = viewModel::undo,
+            onRedo = viewModel::redo,
+            onSave = {
+                saveFileLauncher.launch(FileUtils.generateExportFilename(pdfUri?.lastPathSegment))
+            },
+            onOpenGeminiSketch = { showGeminiSketch = true },
+            onOpenConverter = { showConverterDialog = true },
+            onOpenTranslator = { showTranslatorDialog = true },
+            onOpenScanner = { showScannerDialog = true },
+            onOpenTts = { showTtsDialog = true },
+            onOpenWifiShare = { showWifiShareDialog = true },
+            onOpenCloud = { showCloudDialog = true },
+            onOpenCreatePdf = { showCreatePdfDialog = true },
+            onOpenPassword = { showPasswordDialog = true },
+            onOpenSearch = { showSearchDialog = true },
+            onOpenLink = {
+                linkPosition = Pair(0.1f, 0.1f)
+                showLinkDialog = true
+            },
+            onSmartGraphicSelected = { type -> pendingSmartGraphicType = type },
+            isAecModeActive = isAecModeActive,
+            onToggleAecMode = {
+                isAecModeActive = !isAecModeActive
+                if (!isAecModeActive) currentAecTool = AecToolType.NONE
+            },
+            onOpenCompare = { showComparePalette = true },
+            onOpenMcpServer = { showMcpDialog = true }
+        )
+    }
+
     if (isLandscape) {
-        // Landscape layout: Toolbar on the left, content on the right
+        // Landscape layout: Toolbar on the left (unless in focus mode), content on the right
         Row(modifier = Modifier.fillMaxSize()) {
-            // Left panel: Toolbar — background and padding handled per-theme
-            val leftPanelModifier = when (appTheme) {
-                AppTheme.LONGHORN_SLATE ->
-                    Modifier.weight(0.25f).fillMaxHeight()
-                else ->
-                    Modifier.weight(0.3f).fillMaxHeight()
-                        .background(MaterialTheme.colorScheme.surface)
-                        .padding(16.dp)
-            }
-            Column(modifier = leftPanelModifier) {
-                AnnotationToolbar(
-                    activeTool = activeTool,
-                    canUndo = canUndo,
-                    canRedo = canRedo,
-                    hasDocument = pdfUri != null,
-                    toolbarVisibility = toolbarVisibility,
-                    onOpenFile = { openFileLauncher.launch(arrayOf("application/pdf")) },
-                    onSettingsClick = { showSettings = true },
-                    onBugReportClick = { showBugReportDialog = true },
-                    onBookmarksClick = { showBookmarkPanel = true },
-                    onToolSelected = viewModel::selectTool,
-                    onUndo = viewModel::undo,
-                    onRedo = viewModel::redo,
-                    onSave = { saveFileLauncher.launch("annotated_document.pdf") },
-                    onOpenGeminiSketch = { showGeminiSketch = true },
-                    onOpenConverter = { showConverterDialog = true },
-                    onOpenTranslator = { showTranslatorDialog = true },
-                    onOpenScanner = { showScannerDialog = true },
-                    onOpenTts = { showTtsDialog = true },
-                    onOpenWifiShare = { showWifiShareDialog = true },
-                    onOpenCloud = { showCloudDialog = true },
-                    onOpenCreatePdf = { showCreatePdfDialog = true },
-                    onOpenPassword = { showPasswordDialog = true },
-                    onOpenSearch = { showSearchDialog = true },
-                    onOpenLink = {
-                        linkPosition = Pair(0.1f, 0.1f)
-                        showLinkDialog = true
-                    },
-                    onSmartGraphicSelected = { type -> pendingSmartGraphicType = type },
-                    isAecModeActive = isAecModeActive,
-                    onToggleAecMode = { isAecModeActive = !isAecModeActive },
-                    onOpenCompare = { showComparePalette = true },
-                    onOpenMcpServer = { showMcpDialog = true }
-                )
-                if (isAecModeActive) {
-                    AecToolbarMenu(
-                        selectedTool = currentAecTool,
-                        currentScale = drawingScale,
-                        onToolSelected = { currentAecTool = it },
-                        onOpenScaleDialog = { showAecScaleDialog = true },
-                        onOpenTakeoffDialog = { showAecTakeoffDialog = true }
+            if (!isFocusMode) {
+                val leftPanelModifier = when (appTheme) {
+                    AppTheme.LONGHORN_SLATE ->
+                        Modifier.weight(0.25f).fillMaxHeight()
+                    else ->
+                        Modifier.weight(0.3f).fillMaxHeight()
+                            .background(MaterialTheme.colorScheme.surface)
+                            .padding(16.dp)
+                }
+                Column(modifier = leftPanelModifier) {
+                    renderToolbar()
+                    if (isAecModeActive) {
+                        AecToolbarMenu(
+                            selectedTool = currentAecTool,
+                            currentScale = drawingScale,
+                            onToolSelected = { currentAecTool = it },
+                            onOpenScaleDialog = { showAecScaleDialog = true },
+                            onOpenTakeoffDialog = { showAecTakeoffDialog = true }
+                        )
+                    }
+                    ToolOptionsPanel(
+                        activeTool = activeTool,
+                        selectedColor = penColor,
+                        strokeWidth = strokeWidth,
+                        onColorSelected = viewModel::setColor,
+                        onStrokeWidthChanged = viewModel::setStrokeWidth,
+                        onCloseTool = { viewModel.selectTool(null) }
                     )
                 }
-                ToolOptionsPanel(
-                    activeTool = activeTool,
-                    selectedColor = penColor,
-                    strokeWidth = strokeWidth,
-                    onColorSelected = viewModel::setColor,
-                    onStrokeWidthChanged = viewModel::setStrokeWidth
-                )
             }
-            // Right panel: PDF content
+            val contentWeight = when {
+                isFocusMode -> 1f
+                appTheme == AppTheme.LONGHORN_SLATE -> 0.75f
+                else -> 0.7f
+            }
             Box(
                 modifier = Modifier
-                    .weight(0.7f)
+                    .weight(contentWeight)
                     .fillMaxHeight()
                     .background(MaterialTheme.colorScheme.surfaceVariant)
             ) {
-                if (pdfUri != null) {
-                    // PDF Viewer (bottom layer)
-                    PdfViewer(
-                        pdfUri = pdfUri,
-                        modifier = Modifier.fillMaxSize(),
-                        onPageChanged = viewModel::onPageChanged,
-                        onPageInfoUpdated = { pageInfo = it }
-                    )
-
-                    // Annotation layer
-                    val currentPageAnnotations = annotations[currentPage] ?: emptyList()
-
-                    if (activeTool != null && activeTool != AnnotationType.SELECT && activeTool != AnnotationType.LASSO) {
-                        // Active tool: canvas intercepts touches
-                        AnnotationCanvas(
-                            annotations = currentPageAnnotations,
-                            currentPageIndex = currentPage,
-                            activeTool = activeTool!!,
-                            penColor = penColor,
-                            penStrokeWidth = strokeWidth,
-                            pageInfo = pageInfo,
-                            onAddAnnotation = viewModel::addAnnotation,
-                            onRemoveAnnotation = viewModel::removeAnnotation,
-                            onRequestTextNote = { x, y ->
-                                textNotePosition = Pair(x, y)
-                                showTextNoteDialog = true
-                            },
-                            onRequestSignature = { x, y ->
-                                signaturePendingPosition = Pair(x, y)
-                                showSignatureDialog = true
-                            },
-                            onRequestComment = { x, y ->
-                                commentPosition = Pair(x, y)
-                                commentInput = ""
-                                editingComment = null
-                                showCommentDialog = true
-                            },
-                            onRequestTable = { x, y ->
-                                tablePosition = Pair(x, y)
-                                editingTable = null
-                                showTablePicker = true
-                            },
-                            onRequestImage = { x, y ->
-                                imagePendingPosition = Pair(x, y)
-                                signaturePendingPosition = Pair(x, y)
-                                showImageOrSignatureDialog = true
-                            },
-                            onRequestLink = { x, y ->
-                                linkPosition = Pair(x, y)
-                                showLinkDialog = true
-                            },
-                            onRequestTextBox = { x, y ->
-                                textBoxPosition = Pair(x, y)
-                                editingTextBox = null
-                                showTextBoxDialog = true
-                            },
-                            onEditTextBox = { textBox ->
-                                editingTextBox = textBox
-                                textBoxPosition = Pair(textBox.x, textBox.y)
-                                showTextBoxDialog = true
-                            },
-                            pendingSmartGraphicType = pendingSmartGraphicType,
-                            externalImageCache = imageBitmapCache,
-                            pageTextContent = currentPageTextContent,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else if (activeTool == AnnotationType.SELECT || activeTool == AnnotationType.LASSO) {
-                        // SELECT / LASSO: show overlay for multi-selection
-                        SelectLassoOverlay(
-                            annotations = currentPageAnnotations,
-                            pageInfo = pageInfo,
-                            activeTool = activeTool!!,
-                            onUpdateAnnotation = viewModel::updateAnnotation,
-                            onRemoveAnnotations = { ids -> ids.forEach { viewModel.removeAnnotation(it) } },
-                            onDuplicateAnnotations = { copies -> copies.forEach { viewModel.addAnnotation(it) } },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        // Kein Werkzeug aktiv: Ebenen-Modus mit auswählbaren/movebaren Strokes
-                        AnnotationLayerOverlay(
-                            annotations = currentPageAnnotations,
-                            pageInfo = pageInfo,
-                            selectedId = selectedAnnotationId,
-                            onSelectedChange = { selectedAnnotationId = it },
-                            onUpdateAnnotation = viewModel::updateAnnotation,
-                            onRemoveAnnotation = { id ->
-                                viewModel.removeAnnotation(id)
-                                if (selectedAnnotationId == id) {
-                                    selectedAnnotationId = null
-                                }
-                            },
-                            onCopyAnnotation = { annotation ->
-                                copyStrokeToClipboard(context, annotation, pageInfo)
-                            },
-                            externalImageCache = imageBitmapCache,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                        // Kommentar-Tap + TextBox-Doppeltipp im Landscape-Modus
-                        AnnotationDisplayOverlay(
-                            annotations = currentPageAnnotations.filter { it is Annotation.Comment || it is Annotation.TextBox },
-                            pageInfo = pageInfo,
-                            onCommentTapped = { comment ->
-                                editingComment = comment
-                                commentInput = comment.text
-                                showCommentDialog = true
-                            },
-                            onTextBoxDoubleTapped = { textBox ->
-                                editingTextBox = textBox
-                                textBoxPosition = Pair(textBox.x, textBox.y)
-                                showTextBoxDialog = true
-                            },
-                            externalImageCache = imageBitmapCache,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-
-                    // Saving indicator
-                    if (isSaving) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color.Black.copy(alpha = 0.3f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator()
-                        }
-                    }
-                } else {
-                    // Empty state
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clickable { openFileLauncher.launch(arrayOf("application/pdf")) },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "PDF öffnen, um zu beginnen",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+                viewportContent()
             }
         }
     } else {
         // Portrait layout — Cupertino: bottom floating bar; Aero/Slate: top bar
-        val toolbarComposable: @Composable () -> Unit = {
+        val portraitToolbarSection: @Composable () -> Unit = {
             Column {
-                AnnotationToolbar(
-                    activeTool = activeTool,
-                    canUndo = canUndo,
-                    canRedo = canRedo,
-                    hasDocument = pdfUri != null,
-                    toolbarVisibility = toolbarVisibility,
-                    onOpenFile = { openFileLauncher.launch(arrayOf("application/pdf")) },
-                    onSettingsClick = { showSettings = true },
-                    onBugReportClick = { showBugReportDialog = true },
-                    onBookmarksClick = { showBookmarkPanel = true },
-                    onToolSelected = viewModel::selectTool,
-                    onUndo = viewModel::undo,
-                    onRedo = viewModel::redo,
-                    onSave = { saveFileLauncher.launch("annotated_document.pdf") },
-                    onOpenGeminiSketch = { showGeminiSketch = true },
-                    onOpenConverter = { showConverterDialog = true },
-                    onOpenTranslator = { showTranslatorDialog = true },
-                    onOpenScanner = { showScannerDialog = true },
-                    onOpenTts = { showTtsDialog = true },
-                    onOpenWifiShare = { showWifiShareDialog = true },
-                    onOpenCloud = { showCloudDialog = true },
-                    onOpenCreatePdf = { showCreatePdfDialog = true },
-                    onOpenPassword = { showPasswordDialog = true },
-                    onOpenSearch = { showSearchDialog = true },
-                    onOpenLink = {
-                        linkPosition = Pair(0.1f, 0.1f)
-                        showLinkDialog = true
-                    },
-                    onSmartGraphicSelected = { type -> pendingSmartGraphicType = type },
-                    isAecModeActive = isAecModeActive,
-                    onToggleAecMode = { isAecModeActive = !isAecModeActive },
-                    onOpenCompare = { showComparePalette = true },
-                    onOpenMcpServer = { showMcpDialog = true }
-                )
+                renderToolbar()
                 if (isAecModeActive) {
                     AecToolbarMenu(
                         selectedTool = currentAecTool,
@@ -1013,25 +1163,33 @@ fun PdfViewerScreen(
                         selectedColor = penColor,
                         strokeWidth = strokeWidth,
                         onColorSelected = viewModel::setColor,
-                        onStrokeWidthChanged = viewModel::setStrokeWidth
+                        onStrokeWidthChanged = viewModel::setStrokeWidth,
+                        onCloseTool = { viewModel.selectTool(null) }
                     )
                 }
             }
         }
         Scaffold(
-            topBar    = if (appTheme != AppTheme.CUPERTINO_MINIMALIST) toolbarComposable else { {} },
-            bottomBar = if (appTheme == AppTheme.CUPERTINO_MINIMALIST) ({
+            topBar = if (!isFocusMode && appTheme != AppTheme.CUPERTINO_MINIMALIST) {
+                portraitToolbarSection
+            } else {
+                {}
+            },
+            bottomBar = if (!isFocusMode && appTheme == AppTheme.CUPERTINO_MINIMALIST) ({
                 Column(modifier = Modifier.navigationBarsPadding()) {
                     ToolOptionsPanel(
                         activeTool = activeTool,
                         selectedColor = penColor,
                         strokeWidth = strokeWidth,
                         onColorSelected = viewModel::setColor,
-                        onStrokeWidthChanged = viewModel::setStrokeWidth
+                        onStrokeWidthChanged = viewModel::setStrokeWidth,
+                        onCloseTool = { viewModel.selectTool(null) }
                     )
-                    toolbarComposable()
+                    portraitToolbarSection()
                 }
-            }) else { {} }
+            }) else {
+                {}
+            }
         ) { paddingValues ->
             Box(
                 modifier = Modifier
@@ -1039,129 +1197,7 @@ fun PdfViewerScreen(
                     .padding(paddingValues)
                     .background(MaterialTheme.colorScheme.surfaceVariant)
             ) {
-                if (pdfUri != null) {
-                    // PDF Viewer (bottom layer)
-                    PdfViewer(
-                        pdfUri = pdfUri,
-                        modifier = Modifier.fillMaxSize(),
-                        onPageChanged = viewModel::onPageChanged,
-                        onPageInfoUpdated = { pageInfo = it }
-                    )
-
-                    // Annotation layer
-                    val currentPageAnnotations = annotations[currentPage] ?: emptyList()
-
-                    if (activeTool != null && activeTool != AnnotationType.SELECT && activeTool != AnnotationType.LASSO) {
-                        // Active tool: canvas intercepts touches
-                        AnnotationCanvas(
-                            annotations = currentPageAnnotations,
-                            currentPageIndex = currentPage,
-                            activeTool = activeTool!!,
-                            penColor = penColor,
-                            penStrokeWidth = strokeWidth,
-                            pageInfo = pageInfo,
-                            onAddAnnotation = viewModel::addAnnotation,
-                            onRemoveAnnotation = viewModel::removeAnnotation,
-                            onRequestTextNote = { x, y ->
-                                textNotePosition = Pair(x, y)
-                                showTextNoteDialog = true
-                            },
-                            onRequestSignature = { x, y ->
-                                signaturePendingPosition = Pair(x, y)
-                                showSignatureDialog = true
-                            },
-                            onRequestComment = { x, y ->
-                                commentPosition = Pair(x, y)
-                                commentInput = ""
-                                editingComment = null
-                                showCommentDialog = true
-                            },
-                            onRequestTable = { x, y ->
-                                tablePosition = Pair(x, y)
-                                editingTable = null
-                                showTablePicker = true
-                            },
-                            onRequestImage = { x, y ->
-                                imagePendingPosition = Pair(x, y)
-                                signaturePendingPosition = Pair(x, y)
-                                showImageOrSignatureDialog = true
-                            },
-                            onRequestLink = { x, y ->
-                                linkPosition = Pair(x, y)
-                                showLinkDialog = true
-                            },
-                            onRequestTextBox = { x, y ->
-                                textBoxPosition = Pair(x, y)
-                                editingTextBox = null
-                                showTextBoxDialog = true
-                            },
-                            onEditTextBox = { textBox ->
-                                editingTextBox = textBox
-                                textBoxPosition = Pair(textBox.x, textBox.y)
-                                showTextBoxDialog = true
-                            },
-                            pendingSmartGraphicType = pendingSmartGraphicType,
-                            externalImageCache = imageBitmapCache,
-                            pageTextContent = currentPageTextContent,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else if (activeTool == AnnotationType.SELECT || activeTool == AnnotationType.LASSO) {
-                        // SELECT / LASSO: show overlay for multi-selection
-                        SelectLassoOverlay(
-                            annotations = currentPageAnnotations,
-                            pageInfo = pageInfo,
-                            activeTool = activeTool!!,
-                            onUpdateAnnotation = viewModel::updateAnnotation,
-                            onRemoveAnnotations = { ids -> ids.forEach { viewModel.removeAnnotation(it) } },
-                            onDuplicateAnnotations = { copies -> copies.forEach { viewModel.addAnnotation(it) } },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        // No tool: read-only display + comment tap
-                        AnnotationDisplayOverlay(
-                            annotations = currentPageAnnotations,
-                            pageInfo = pageInfo,
-                            onCommentTapped = { comment ->
-                                editingComment = comment
-                                commentInput = comment.text
-                                showCommentDialog = true
-                            },
-                            onTextBoxDoubleTapped = { textBox ->
-                                editingTextBox = textBox
-                                textBoxPosition = Pair(textBox.x, textBox.y)
-                                showTextBoxDialog = true
-                            },
-                            externalImageCache = imageBitmapCache,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-
-                    // Saving indicator
-                    if (isSaving) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color.Black.copy(alpha = 0.3f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator()
-                        }
-                    }
-                } else {
-                    // Empty state
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clickable { openFileLauncher.launch(arrayOf("application/pdf")) },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "PDF öffnen, um zu beginnen",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+                viewportContent()
             }
         }
     }
@@ -1228,7 +1264,207 @@ fun PdfViewerScreen(
             },
             appTheme = appTheme,
             onAppThemeChange = onAppThemeChange,
+            hasDocument = pdfUri != null,
+            onDeletePagesClick = { showDeletePagesDialog = true },
+            onReorderPagesClick = { showReorderPagesDialog = true },
             onDismiss = { showSettings = false }
+        )
+    }
+
+    // Jump to Page Dialog
+    if (showJumpToPageDialog && pageCount > 0) {
+        AlertDialog(
+            onDismissRequest = { showJumpToPageDialog = false },
+            title = { Text("Zu Seite springen") },
+            text = {
+                OutlinedTextField(
+                    value = jumpPageInput,
+                    onValueChange = { input ->
+                        jumpPageInput = input.filter { it.isDigit() }
+                    },
+                    label = { Text("Seitenzahl (1–$pageCount)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val parsed = jumpPageInput.toIntOrNull()
+                        if (parsed != null && parsed in 1..pageCount) {
+                            viewModel.navigateToPage(parsed - 1)
+                            showJumpToPageDialog = false
+                        } else {
+                            Toast.makeText(context, "Bitte eine Zahl zwischen 1 und $pageCount eingeben", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                ) {
+                    Text("Los")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showJumpToPageDialog = false }) {
+                    Text("Abbrechen")
+                }
+            }
+        )
+    }
+
+    // Delete Pages Dialog
+    if (showDeletePagesDialog && pageCount > 0) {
+        var selectedToDelete by remember(pageCount) { mutableStateOf<Set<Int>>(emptySet()) }
+        val validSelection = selectedToDelete.isNotEmpty() && selectedToDelete.size < pageCount
+        AlertDialog(
+            onDismissRequest = { showDeletePagesDialog = false },
+            title = { Text("Seiten löschen") },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(300.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text = if (selectedToDelete.size >= pageCount) {
+                            "Mindestens eine Seite muss erhalten bleiben."
+                        } else {
+                            "Zu löschende Seiten auswählen (${selectedToDelete.size} markiert):"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (selectedToDelete.size >= pageCount) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    for (idx in 0 until pageCount) {
+                        val checked = idx in selectedToDelete
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    selectedToDelete = if (checked) selectedToDelete - idx else selectedToDelete + idx
+                                }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = checked,
+                                onCheckedChange = { isChecked ->
+                                    selectedToDelete = if (isChecked) selectedToDelete + idx else selectedToDelete - idx
+                                }
+                            )
+                            Text("Seite ${idx + 1}", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = validSelection,
+                    onClick = {
+                        viewModel.deletePages(context, selectedToDelete) { ok, err ->
+                            Toast.makeText(
+                                context,
+                                if (ok) "Seiten gelöscht" else (err ?: "Fehler beim Löschen"),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                        showDeletePagesDialog = false
+                    }
+                ) {
+                    Text("Löschen")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeletePagesDialog = false }) {
+                    Text("Abbrechen")
+                }
+            }
+        )
+    }
+
+    // Reorder Pages Dialog
+    if (showReorderPagesDialog && pageCount > 1) {
+        var pageOrder by remember(pageCount) { mutableStateOf((0 until pageCount).toList()) }
+        AlertDialog(
+            onDismissRequest = { showReorderPagesDialog = false },
+            title = { Text("Seiten umordnen") },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(320.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text = "Reihenfolge über Pfeiltasten anpassen:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    pageOrder.forEachIndexed { posIdx, origPageIdx ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${posIdx + 1}. Original-Seite ${origPageIdx + 1}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(
+                                enabled = posIdx > 0,
+                                onClick = {
+                                    val mutable = pageOrder.toMutableList()
+                                    val moved = mutable.removeAt(posIdx)
+                                    mutable.add(posIdx - 1, moved)
+                                    pageOrder = mutable
+                                }
+                            ) {
+                                Icon(Icons.Default.ArrowUpward, contentDescription = "Nach oben")
+                            }
+                            IconButton(
+                                enabled = posIdx < pageOrder.lastIndex,
+                                onClick = {
+                                    val mutable = pageOrder.toMutableList()
+                                    val moved = mutable.removeAt(posIdx)
+                                    mutable.add(posIdx + 1, moved)
+                                    pageOrder = mutable
+                                }
+                            ) {
+                                Icon(Icons.Default.ArrowDownward, contentDescription = "Nach unten")
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.reorderPages(context, pageOrder) { ok, err ->
+                            Toast.makeText(
+                                context,
+                                if (ok) "Seitenreihenfolge aktualisiert" else (err ?: "Fehler beim Umordnen"),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                        showReorderPagesDialog = false
+                    }
+                ) {
+                    Text("Anwenden")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showReorderPagesDialog = false }) {
+                    Text("Abbrechen")
+                }
+            }
         )
     }
 
@@ -1406,4 +1642,488 @@ private fun copyStrokeToClipboard(
     val clipboard = context.getSystemService(ClipboardManager::class.java)
     val clip = ClipData.newUri(context.contentResolver, "Annotation-Ebene", uri)
     clipboard?.setPrimaryClip(clip)
+}
+
+@Composable
+private fun PdfDocumentViewport(
+    pdfUri: Uri?,
+    currentPage: Int,
+    pageCount: Int,
+    pageInfo: PdfPageInfo,
+    activeTool: AnnotationType?,
+    penColor: Color,
+    strokeWidth: Float,
+    annotations: Map<Int, List<Annotation>>,
+    takeoffItems: List<MeasurementItem>,
+    drawingScale: DrawingScale,
+    isAecModeActive: Boolean,
+    currentAecTool: AecToolType,
+    lastMeasuredPixelLength: Float,
+    pendingAreaPoints: List<Offset>,
+    pendingSmartGraphicType: com.annotatio.maximus.model.SmartGraphicType,
+    currentPageTextContent: PageTextContent?,
+    imageBitmapCache: Map<String, ImageBitmap?>,
+    isSaving: Boolean,
+    isFocusMode: Boolean,
+    isBookmarked: Boolean,
+    onPageChanged: (Int, Int) -> Unit,
+    onPageInfoUpdated: (PdfPageInfo) -> Unit,
+    onSelectTool: (AnnotationType?) -> Unit,
+    onClearAecTool: () -> Unit,
+    onAddAnnotation: (Annotation) -> Unit,
+    onRemoveAnnotation: (String) -> Unit,
+    onUpdateAnnotations: (List<Annotation>) -> Unit,
+    onRemoveAnnotations: (List<String>) -> Unit,
+    onDuplicateAnnotations: (List<Annotation>) -> List<Annotation>,
+    onCopyAnnotation: (Annotation) -> Unit,
+    onAreaPointAdded: (Offset) -> Unit,
+    onUndoAreaPoint: () -> Unit,
+    onCompleteAreaPolygon: () -> Unit,
+    onAddTakeoffItem: (MeasurementItem) -> Unit,
+    onRemoveTakeoffItem: (String) -> Unit,
+    onMeasuredPixelLength: (Float) -> Unit,
+    onRequestTextNote: (Float, Float) -> Unit,
+    onEditTextNote: (Annotation.TextNote) -> Unit,
+    onRequestSignature: (Float, Float) -> Unit,
+    onRequestComment: (Float, Float) -> Unit,
+    onEditComment: (Annotation.Comment) -> Unit,
+    onRequestTable: (Float, Float) -> Unit,
+    onEditTable: (Annotation.Table) -> Unit,
+    onRequestImage: (Float, Float) -> Unit,
+    onRequestLink: (Float, Float) -> Unit,
+    onOpenUrl: (String) -> Unit,
+    onRequestTextBox: (Float, Float) -> Unit,
+    onEditTextBox: (Annotation.TextBox) -> Unit,
+    onRequestCallout: (Offset, Offset) -> Unit,
+    onNavigateToPage: (Int) -> Unit,
+    onOpenJumpToPage: () -> Unit,
+    onToggleBookmark: () -> Unit,
+    onToggleFocusMode: () -> Unit,
+    onOpenFile: () -> Unit,
+    onOpenSamplePdf: () -> Unit,
+    onOpenCreatePdf: () -> Unit,
+    onOpenScanner: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(modifier = modifier) {
+        if (pdfUri != null) {
+            val currentPageAnnotations = annotations[currentPage] ?: emptyList()
+            val currentPageTakeoffItems = remember(takeoffItems, currentPage) {
+                takeoffItems.filter { it.pageIndex == currentPage }
+            }
+            val isAecDrawing = isAecModeActive && currentAecTool != AecToolType.NONE
+
+            PdfViewer(
+                pdfUri = pdfUri,
+                modifier = Modifier.fillMaxSize(),
+                currentPage = currentPage,
+                onPageChanged = onPageChanged,
+                onPageInfoUpdated = onPageInfoUpdated,
+                onPageTap = { tapOffset ->
+                    val canHandleTap = (activeTool == null || activeTool == AnnotationType.HAND) &&
+                        !isAecDrawing &&
+                        pageInfo.pageWidth > 0f &&
+                        pageInfo.pageHeight > 0f
+                    if (!canHandleTap) return@PdfViewer false
+
+                    val nx = ((tapOffset.x - pageInfo.offsetX) / pageInfo.pageWidth).coerceIn(0f, 1f)
+                    val ny = ((tapOffset.y - pageInfo.offsetY) / pageInfo.pageHeight).coerceIn(0f, 1f)
+                    val tapThreshold = 0.045f
+
+                    val commentHit = currentPageAnnotations.filterIsInstance<Annotation.Comment>().findLast { c ->
+                        kotlin.math.abs(c.x - nx) < tapThreshold && kotlin.math.abs(c.y - ny) < tapThreshold
+                    }
+                    if (commentHit != null) {
+                        onEditComment(commentHit)
+                        return@PdfViewer true
+                    }
+
+                    val noteHit = currentPageAnnotations.filterIsInstance<Annotation.TextNote>().findLast { n ->
+                        kotlin.math.abs(n.x - nx) < tapThreshold && kotlin.math.abs(n.y - ny) < tapThreshold
+                    }
+                    if (noteHit != null) {
+                        onEditTextNote(noteHit)
+                        return@PdfViewer true
+                    }
+
+                    val textBoxHit = currentPageAnnotations.filterIsInstance<Annotation.TextBox>().findLast { tb ->
+                        nx in tb.x..(tb.x + tb.width) && ny in tb.y..(tb.y + tb.height)
+                    }
+                    if (textBoxHit != null) {
+                        onEditTextBox(textBoxHit)
+                        return@PdfViewer true
+                    }
+
+                    val tableHit = currentPageAnnotations.filterIsInstance<Annotation.Table>().findLast { tbl ->
+                        nx in tbl.x..(tbl.x + tbl.width) && ny in tbl.y..(tbl.y + tbl.height)
+                    }
+                    if (tableHit != null) {
+                        onEditTable(tableHit)
+                        return@PdfViewer true
+                    }
+
+                    val linkHit = currentPageAnnotations.filterIsInstance<Annotation.Link>().findLast { lnk ->
+                        nx in (lnk.x - 0.02f)..(lnk.x + 0.28f) &&
+                            ny in (lnk.y - 0.04f)..(lnk.y + 0.03f)
+                    }
+                    if (linkHit != null) {
+                        onOpenUrl(linkHit.url)
+                        return@PdfViewer true
+                    }
+                    false
+                }
+            )
+
+            val showCanvas = (activeTool != null &&
+                activeTool != AnnotationType.SELECT &&
+                activeTool != AnnotationType.LASSO &&
+                activeTool != AnnotationType.HAND) || isAecDrawing
+
+            when {
+                showCanvas -> {
+                    AnnotationCanvas(
+                        annotations = currentPageAnnotations,
+                        currentPageIndex = currentPage,
+                        activeTool = activeTool ?: AnnotationType.HAND,
+                        penColor = penColor,
+                        penStrokeWidth = strokeWidth,
+                        pageInfo = pageInfo,
+                        onAddAnnotation = onAddAnnotation,
+                        onRemoveAnnotation = onRemoveAnnotation,
+                        onRequestTextNote = onRequestTextNote,
+                        onRequestSignature = onRequestSignature,
+                        onRequestComment = onRequestComment,
+                        onRequestTable = onRequestTable,
+                        onRequestImage = onRequestImage,
+                        onRequestLink = onRequestLink,
+                        onRequestTextBox = onRequestTextBox,
+                        onEditTextBox = onEditTextBox,
+                        pendingSmartGraphicType = pendingSmartGraphicType,
+                        externalImageCache = imageBitmapCache,
+                        pageTextContent = currentPageTextContent,
+                        currentAecTool = if (isAecModeActive) currentAecTool else AecToolType.NONE,
+                        drawingScale = drawingScale,
+                        takeoffItems = takeoffItems,
+                        pendingAreaPoints = pendingAreaPoints,
+                        onAreaPointAdded = onAreaPointAdded,
+                        onCompleteAreaPolygon = onCompleteAreaPolygon,
+                        onAddTakeoffItem = onAddTakeoffItem,
+                        onRemoveTakeoffItem = onRemoveTakeoffItem,
+                        onRequestCallout = onRequestCallout,
+                        onMeasuredPixelLength = onMeasuredPixelLength,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                activeTool == AnnotationType.SELECT || activeTool == AnnotationType.LASSO -> {
+                    SelectLassoOverlay(
+                        annotations = currentPageAnnotations,
+                        pageInfo = pageInfo,
+                        activeTool = activeTool!!,
+                        onUpdateAnnotations = onUpdateAnnotations,
+                        onRemoveAnnotations = onRemoveAnnotations,
+                        onDuplicateAnnotations = { originals ->
+                            onDuplicateAnnotations(originals)
+                        },
+                        onCopyAnnotation = onCopyAnnotation,
+                        takeoffItems = currentPageTakeoffItems,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                else -> {
+                    AnnotationDisplayOverlay(
+                        annotations = currentPageAnnotations,
+                        pageInfo = pageInfo,
+                        takeoffItems = currentPageTakeoffItems,
+                        externalImageCache = imageBitmapCache,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+
+            // Top-Status-Pill when any drawing/selection or AEC tool is active
+            if (activeTool != null || isAecDrawing) {
+                val statusLabel = if (isAecDrawing) {
+                    val lastMeasureHint = if (lastMeasuredPixelLength > 0f && currentAecTool == AecToolType.DISTANCE) {
+                        " · ${lastMeasuredPixelLength.toInt()} px"
+                    } else ""
+                    "AEC: ${currentAecTool.title} | ${drawingScale.label}$lastMeasureHint"
+                } else {
+                    hudToolName(activeTool!!)
+                }
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                    shadowElevation = 4.dp,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(top = 10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = statusLabel,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        IconButton(
+                            onClick = {
+                                if (isAecDrawing) onClearAecTool() else onSelectTool(null)
+                            },
+                            modifier = Modifier.size(26.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Werkzeug schließen",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Bottom HUD stack (AEC area helper pill + main Bottom-Navigation-HUD-Pill)
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 12.dp, start = 12.dp, end = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (isAecDrawing && currentAecTool == AecToolType.AREA && pendingAreaPoints.isNotEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.95f),
+                        shadowElevation = 4.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "Fläche: ${pendingAreaPoints.size} Punkte",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                            TextButton(onClick = onUndoAreaPoint) {
+                                Icon(Icons.Default.Undo, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Zurück")
+                            }
+                            Button(
+                                enabled = pendingAreaPoints.size >= 3,
+                                onClick = onCompleteAreaPolygon
+                            ) {
+                                Text("Abschließen")
+                            }
+                        }
+                    }
+                }
+
+                // Bottom-Navigation-HUD-Pill
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                    shadowElevation = 6.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            enabled = currentPage > 0,
+                            onClick = { onNavigateToPage(currentPage - 1) },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ChevronLeft,
+                                contentDescription = "Vorherige Seite"
+                            )
+                        }
+
+                        Text(
+                            text = "Seite ${currentPage + 1} / ${pageCount.coerceAtLeast(1)}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier
+                                .clickable(enabled = pageCount > 0, onClick = onOpenJumpToPage)
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                        )
+
+                        IconButton(
+                            enabled = currentPage < pageCount - 1,
+                            onClick = { onNavigateToPage(currentPage + 1) },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = "Nächste Seite"
+                            )
+                        }
+
+                        IconButton(
+                            onClick = onToggleBookmark,
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                contentDescription = if (isBookmarked) "Lesezeichen entfernen" else "Lesezeichen setzen",
+                                tint = if (isBookmarked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        ) {
+                            Text(
+                                text = "${(pageInfo.zoom * 100).toInt().coerceAtLeast(100)}%",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = onToggleFocusMode,
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isFocusMode) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                contentDescription = if (isFocusMode) "Werkzeugleisten einblenden" else "Fokus-Modus",
+                                tint = if (isFocusMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Saving indicator
+            if (isSaving) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.3f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
+                }
+            }
+        } else {
+            // Enriched Empty State Card
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Card(
+                    shape = RoundedCornerShape(24.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier.widthIn(max = 420.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(64.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.PictureAsPdf,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = "Annotatio Maximus",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Öffne ein PDF-Dokument oder starte mit einer Vorlage, Skizze oder einem Scan.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Button(
+                            onClick = onOpenFile,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("PDF öffnen")
+                        }
+                        FilledTonalButton(
+                            onClick = onOpenSamplePdf,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Beispiel-PDF laden")
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = onOpenCreatePdf,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Neu")
+                            }
+                            OutlinedButton(
+                                onClick = onOpenScanner,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.DocumentScanner, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Scannen")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun hudToolName(tool: AnnotationType): String = when (tool) {
+    AnnotationType.HAND -> "Hand-Tool"
+    AnnotationType.PEN -> "Pinsel"
+    AnnotationType.HIGHLIGHTER -> "Marker"
+    AnnotationType.UNDERLINE -> "Unterstreichen"
+    AnnotationType.STRIKETHROUGH -> "Durchstreichen"
+    AnnotationType.TABLE -> "Tabelle"
+    AnnotationType.TEXT_NOTE -> "Notiz"
+    AnnotationType.TEXT_BOX -> "Textfeld"
+    AnnotationType.COMMENT -> "Kommentar"
+    AnnotationType.IMAGE -> "Bild"
+    AnnotationType.LINK -> "Link"
+    AnnotationType.SELECT -> "Auswählen"
+    AnnotationType.LASSO -> "Lasso"
+    AnnotationType.ERASER -> "Radierer"
+    AnnotationType.CIRCLE -> "Kreis"
+    AnnotationType.SQUARE -> "Quadrat"
+    AnnotationType.RECTANGLE -> "Rechteck"
+    AnnotationType.TRIANGLE -> "Dreieck"
+    AnnotationType.SIGNATURE -> "Unterschrift"
+    AnnotationType.SMART_GRAPHIC -> "Smarte Grafik"
 }

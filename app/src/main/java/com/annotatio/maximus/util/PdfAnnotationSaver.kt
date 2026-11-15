@@ -6,9 +6,18 @@ import android.net.Uri
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import com.annotatio.maximus.model.Annotation
+import com.annotatio.maximus.model.MeasurementItem
+import com.annotatio.maximus.model.MeasurementType
 import com.annotatio.maximus.model.ShapeType
 import com.annotatio.maximus.model.SmartGraphicType
 import com.annotatio.maximus.model.TextBoxFont
+import kotlin.math.PI
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sin
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
@@ -28,15 +37,23 @@ object PdfAnnotationSaver {
         context: Context,
         sourceUri: Uri,
         outputUri: Uri,
-        annotations: Map<Int, List<Annotation>>
+        annotations: Map<Int, List<Annotation>>,
+        takeoffItems: List<MeasurementItem> = emptyList()
     ) {
         PDFBoxResourceLoader.init(context)
 
         context.contentResolver.openInputStream(sourceUri)?.use { inputStream ->
             val document = PDDocument.load(inputStream)
             try {
-                for ((pageIndex, pageAnnotations) in annotations) {
-                    if (pageIndex >= document.numberOfPages) continue
+                val takeoffByPage = takeoffItems.groupBy { it.pageIndex }
+                val allPages = (annotations.keys + takeoffByPage.keys).distinct().sorted()
+
+                for (pageIndex in allPages) {
+                    if (pageIndex !in 0 until document.numberOfPages) continue
+                    val pageAnnotations = annotations[pageIndex].orEmpty()
+                    val pageMeasurements = takeoffByPage[pageIndex].orEmpty()
+                    if (pageAnnotations.isEmpty() && pageMeasurements.isEmpty()) continue
+
                     val page = document.getPage(pageIndex)
                     val mediaBox = page.mediaBox
                     val pageWidth = mediaBox.width
@@ -88,6 +105,10 @@ object PdfAnnotationSaver {
                                     contentStream, annotation, pageWidth, pageHeight
                                 )
                             }
+                        }
+
+                        for (item in pageMeasurements) {
+                            drawMeasurement(contentStream, item, pageWidth, pageHeight)
                         }
                     }
                 }
@@ -185,12 +206,16 @@ object PdfAnnotationSaver {
         cs.setNonStrokingColor(rgb[0], rgb[1], rgb[2])
         drawCircle(cs, x, y, 6f)
 
-        cs.beginText()
-        cs.setFont(PDType1Font.HELVETICA, 8f)
-        cs.setNonStrokingColor(0f, 0f, 0f)
-        cs.newLineAtOffset(x + 10f, y - 3f)
-        cs.showText(note.text.take(80).replace("\n", " "))
-        cs.endText()
+        val font = PDType1Font.HELVETICA
+        val safeText = sanitizeForPdf(note.text.take(80), font)
+        if (safeText.isNotEmpty()) {
+            cs.beginText()
+            cs.setFont(font, 8f)
+            cs.setNonStrokingColor(0f, 0f, 0f)
+            cs.newLineAtOffset(x + 10f, y - 3f)
+            cs.showText(safeText)
+            cs.endText()
+        }
     }
 
     private fun drawShape(
@@ -209,8 +234,13 @@ object PdfAnnotationSaver {
         val h = shape.height * pageHeight
 
         when (shape.type) {
-            ShapeType.RECTANGLE, ShapeType.SQUARE -> {
+            ShapeType.RECTANGLE -> {
                 cs.addRect(x, y, w, h)
+                cs.stroke()
+            }
+            ShapeType.SQUARE -> {
+                val side = minOf(w, h)
+                cs.addRect(x, y + (h - side), side, side)
                 cs.stroke()
             }
             ShapeType.CIRCLE -> {
@@ -309,14 +339,15 @@ object PdfAnnotationSaver {
         }
 
         // Cell texts
+        val cellFont = PDType1Font.HELVETICA
         for (r in 0 until table.rows) {
             if (r >= table.cells.size) break
             for (c in 0 until table.cols) {
                 if (c >= table.cells[r].size) break
-                val text = table.cells[r][c].take(40)
+                val text = sanitizeForPdf(table.cells[r][c].take(40), cellFont)
                 if (text.isNotBlank()) {
                     cs.beginText()
-                    cs.setFont(PDType1Font.HELVETICA, 8f)
+                    cs.setFont(cellFont, 8f)
                     cs.setNonStrokingColor(0f, 0f, 0f)
                     val tx = x + c * cellW + 4f
                     val ty = y + h - (r + 1) * cellH + 4f
@@ -350,12 +381,14 @@ object PdfAnnotationSaver {
         cs.endText()
 
         // Text summary preview
-        if (comment.text.isNotBlank()) {
+        val commentFont = PDType1Font.HELVETICA
+        val safeComment = sanitizeForPdf(comment.text.take(60), commentFont)
+        if (safeComment.isNotBlank()) {
             cs.beginText()
-            cs.setFont(PDType1Font.HELVETICA, 8f)
+            cs.setFont(commentFont, 8f)
             cs.setNonStrokingColor(0.2f, 0.2f, 0.2f)
             cs.newLineAtOffset(x + 12f, y - 3f)
-            cs.showText(comment.text.take(60).replace("\n", " "))
+            cs.showText(safeComment)
             cs.endText()
         }
     }
@@ -372,7 +405,8 @@ object PdfAnnotationSaver {
 
         val font = PDType1Font.HELVETICA_BOLD
         val fontSize = 10f
-        val text = link.displayText.ifBlank { link.url }
+        val text = sanitizeForPdf(link.displayText.ifBlank { link.url }, font)
+        if (text.isBlank()) return
         val textWidth = (font.getStringWidth(text) / 1000f) * fontSize
 
         // Draw blue text
@@ -415,27 +449,90 @@ object PdfAnnotationSaver {
     ) {
         val rgb = colorToRgbFloats(graphic.color)
         val x = graphic.x * pageWidth
-        val y = pageHeight - ((graphic.y + graphic.height) * pageHeight)
+        val topY = pageHeight - (graphic.y * pageHeight)
         val w = graphic.width * pageWidth
         val h = graphic.height * pageHeight
+        val bottomY = topY - h
 
-        // Node box
         cs.setStrokingColor(rgb[0], rgb[1], rgb[2])
         cs.setLineWidth(1.5f)
-        cs.addRect(x, y, w, h)
-        cs.stroke()
 
-        val title = when (graphic.type) {
-            SmartGraphicType.MIND_MAP -> "MindMap Node"
-            SmartGraphicType.ORG_CHART -> "OrgChart Box"
+        val fillGs = PDExtendedGraphicsState().apply { nonStrokingAlphaConstant = 0.14f }
+        val resetGs = PDExtendedGraphicsState().apply { nonStrokingAlphaConstant = 1f }
+
+        when (graphic.type) {
+            SmartGraphicType.MIND_MAP -> {
+                val cx = x + w / 2f
+                val cy = bottomY + h / 2f
+                val nodeR = minOf(w, h) * 0.12f
+                val branchR = nodeR * 0.7f
+                val armLength = minOf(w, h) * 0.30f
+
+                cs.setNonStrokingColor(rgb[0], rgb[1], rgb[2])
+                cs.setGraphicsStateParameters(fillGs)
+                drawCircle(cs, cx, cy, nodeR)
+                cs.setGraphicsStateParameters(resetGs)
+                drawCircleOutline(cs, cx, cy, nodeR)
+
+                val angles = listOf(0f, 72f, 144f, 216f, 288f)
+                for (angleDeg in angles) {
+                    val rad = (angleDeg * PI / 180.0)
+                    val bx = cx + cos(rad).toFloat() * armLength
+                    val by = cy - sin(rad).toFloat() * armLength
+                    cs.moveTo(cx, cy)
+                    cs.lineTo(bx, by)
+                    cs.stroke()
+                    cs.setNonStrokingColor(rgb[0], rgb[1], rgb[2])
+                    cs.setGraphicsStateParameters(fillGs)
+                    drawCircle(cs, bx, by, branchR)
+                    cs.setGraphicsStateParameters(resetGs)
+                    drawCircleOutline(cs, bx, by, branchR)
+                }
+            }
+
+            SmartGraphicType.ORG_CHART -> {
+                val boxW = w * 0.22f
+                val boxH = h * 0.16f
+
+                fun drawOrgBoxPdf(bx: Float, byBottom: Float) {
+                    cs.setNonStrokingColor(rgb[0], rgb[1], rgb[2])
+                    cs.setGraphicsStateParameters(fillGs)
+                    cs.addRect(bx, byBottom, boxW, boxH)
+                    cs.fill()
+                    cs.setGraphicsStateParameters(resetGs)
+                    cs.addRect(bx, byBottom, boxW, boxH)
+                    cs.stroke()
+                }
+
+                // Root box near top
+                val rootBottomY = topY - h * 0.05f - boxH
+                val rootCx = x + w / 2f
+                drawOrgBoxPdf(rootCx - boxW / 2f, rootBottomY)
+
+                // Level 2: 3 boxes
+                val level2BottomY = topY - h * 0.45f - boxH
+                val level2Xs = listOf(
+                    x + w * 0.12f,
+                    x + w * 0.5f - boxW / 2f,
+                    x + w * 0.88f - boxW
+                )
+                for (lx in level2Xs) {
+                    val nodeCx = lx + boxW / 2f
+                    cs.moveTo(rootCx, rootBottomY)
+                    cs.lineTo(nodeCx, level2BottomY + boxH)
+                    cs.stroke()
+                    drawOrgBoxPdf(lx, level2BottomY)
+                }
+
+                // Level 3: 1 child under middle level-2 box
+                val midL2Cx = level2Xs[1] + boxW / 2f
+                val level3BottomY = topY - h * 0.78f - boxH
+                cs.moveTo(midL2Cx, level2BottomY)
+                cs.lineTo(midL2Cx, level3BottomY + boxH)
+                cs.stroke()
+                drawOrgBoxPdf(midL2Cx - boxW / 2f, level3BottomY)
+            }
         }
-
-        cs.beginText()
-        cs.setFont(PDType1Font.HELVETICA_BOLD, 9f)
-        cs.setNonStrokingColor(0.1f, 0.1f, 0.1f)
-        cs.newLineAtOffset(x + 5f, y + h / 2f - 3f)
-        cs.showText(title)
-        cs.endText()
     }
 
     private fun drawTextBox(
@@ -449,21 +546,56 @@ object PdfAnnotationSaver {
         val rgb = colorToRgbFloats(tb.color)
         val font = resolveFont(tb.fontFamily, tb.isBold, tb.isItalic)
         val fontSize = tb.fontSize.coerceIn(8f, 36f)
+        val maxW = (tb.width * pageWidth).coerceAtLeast(fontSize * 3f)
 
         val x = tb.x * pageWidth
         var y = pageHeight - (tb.y * pageHeight) - fontSize
 
-        val lines = tb.text.split("\n")
-        cs.setNonStrokingColor(rgb[0], rgb[1], rgb[2])
+        val wrappedLines = mutableListOf<String>()
+        for (rawParagraph in tb.text.replace("\r", "").split("\n")) {
+            val cleanParagraph = sanitizeForPdf(rawParagraph, font)
+            if (cleanParagraph.isEmpty()) {
+                wrappedLines.add("")
+                continue
+            }
+            val words = cleanParagraph.split(" ")
+            var current = StringBuilder()
+            for (word in words) {
+                val candidate = if (current.isEmpty()) word else "$current $word"
+                val candidateW = (font.getStringWidth(candidate) / 1000f) * fontSize
+                if (candidateW <= maxW || current.isEmpty()) {
+                    current = StringBuilder(candidate)
+                } else {
+                    wrappedLines.add(current.toString())
+                    current = StringBuilder(word)
+                }
+            }
+            if (current.isNotEmpty()) wrappedLines.add(current.toString())
+        }
 
-        for (line in lines) {
-            val sanitized = line.replace("\r", "")
-            if (sanitized.isNotEmpty()) {
+        cs.setNonStrokingColor(rgb[0], rgb[1], rgb[2])
+        cs.setStrokingColor(rgb[0], rgb[1], rgb[2])
+        cs.setLineWidth((fontSize * 0.07f).coerceAtLeast(0.8f))
+
+        for (line in wrappedLines) {
+            if (line.isNotEmpty()) {
+                val lineW = (font.getStringWidth(line) / 1000f) * fontSize
                 cs.beginText()
                 cs.setFont(font, fontSize)
                 cs.newLineAtOffset(x, y)
-                cs.showText(sanitized)
+                cs.showText(line)
                 cs.endText()
+
+                if (tb.isUnderline) {
+                    cs.moveTo(x, y - fontSize * 0.12f)
+                    cs.lineTo(x + lineW, y - fontSize * 0.12f)
+                    cs.stroke()
+                }
+                if (tb.isStrikethrough) {
+                    cs.moveTo(x, y + fontSize * 0.30f)
+                    cs.lineTo(x + lineW, y + fontSize * 0.30f)
+                    cs.stroke()
+                }
             }
             y -= (fontSize * 1.25f)
         }
@@ -560,6 +692,240 @@ object PdfAnnotationSaver {
         cs.moveTo(x, y)
         cs.lineTo(x + w, y)
         cs.stroke()
+    }
+
+    private fun drawMeasurement(
+        cs: PDPageContentStream,
+        item: MeasurementItem,
+        pageWidth: Float,
+        pageHeight: Float
+    ) {
+        if (item.points.isEmpty()) return
+        val accentColor = when (item.type) {
+            MeasurementType.DISTANCE -> Color(0xFFE53935)
+            MeasurementType.AREA -> Color(0xFF1E88E5)
+            MeasurementType.PERIMETER -> Color(0xFF8E24AA)
+            MeasurementType.COUNT -> Color(0xFF43A047)
+            MeasurementType.REVISION_CLOUD -> Color(0xFFFB8C00)
+            MeasurementType.CALLOUT -> Color(0xFFD81B60)
+        }
+        val rgb = colorToRgbFloats(accentColor)
+        val pts = item.points.map { it.x * pageWidth to (pageHeight - it.y * pageHeight) }
+        val font = PDType1Font.HELVETICA_BOLD
+        val displayLabel = item.formattedText.ifBlank {
+            item.label.ifBlank {
+                MeasureCalculator.formatMeasurement(item.type, item.calculatedValue, item.unit)
+            }
+        }
+
+        cs.setStrokingColor(rgb[0], rgb[1], rgb[2])
+        cs.setNonStrokingColor(rgb[0], rgb[1], rgb[2])
+        cs.setLineWidth(1.8f)
+
+        fun drawPillLabel(cx: Float, cy: Float, rawLabel: String) {
+            val text = sanitizeForPdf(rawLabel, font)
+            if (text.isBlank()) return
+            val fontSize = 8f
+            val textW = (font.getStringWidth(text) / 1000f) * fontSize
+            val padX = 4f
+            val pillW = textW + padX * 2f
+            val pillH = 12f
+            cs.setNonStrokingColor(0.12f, 0.13f, 0.16f)
+            cs.addRect(cx - pillW / 2f, cy - pillH / 2f, pillW, pillH)
+            cs.fill()
+            cs.setStrokingColor(rgb[0], rgb[1], rgb[2])
+            cs.setLineWidth(0.8f)
+            cs.addRect(cx - pillW / 2f, cy - pillH / 2f, pillW, pillH)
+            cs.stroke()
+            cs.beginText()
+            cs.setFont(font, fontSize)
+            cs.setNonStrokingColor(1f, 1f, 1f)
+            cs.newLineAtOffset(cx - textW / 2f, cy - fontSize * 0.3f)
+            cs.showText(text)
+            cs.endText()
+        }
+
+        when (item.type) {
+            MeasurementType.DISTANCE -> {
+                if (pts.size < 2) return
+                val (x0, y0) = pts[0]
+                val (x1, y1) = pts[1]
+                cs.moveTo(x0, y0)
+                cs.lineTo(x1, y1)
+                cs.stroke()
+                val dx = x1 - x0
+                val dy = y1 - y0
+                val len = hypot(dx, dy).coerceAtLeast(1f)
+                val nx = -dy / len * 5f
+                val ny = dx / len * 5f
+                cs.moveTo(x0 - nx, y0 - ny); cs.lineTo(x0 + nx, y0 + ny); cs.stroke()
+                cs.moveTo(x1 - nx, y1 - ny); cs.lineTo(x1 + nx, y1 + ny); cs.stroke()
+                drawPillLabel((x0 + x1) / 2f, (y0 + y1) / 2f + 10f, displayLabel)
+            }
+
+            MeasurementType.AREA -> {
+                if (pts.size < 3) return
+                val fillGs = PDExtendedGraphicsState().apply { nonStrokingAlphaConstant = 0.2f }
+                val resetGs = PDExtendedGraphicsState().apply { nonStrokingAlphaConstant = 1f }
+                cs.setGraphicsStateParameters(fillGs)
+                cs.moveTo(pts[0].first, pts[0].second)
+                for (i in 1 until pts.size) cs.lineTo(pts[i].first, pts[i].second)
+                cs.closePath()
+                cs.fill()
+                cs.setGraphicsStateParameters(resetGs)
+
+                cs.moveTo(pts[0].first, pts[0].second)
+                for (i in 1 until pts.size) cs.lineTo(pts[i].first, pts[i].second)
+                cs.closePath()
+                cs.stroke()
+
+                val cx = pts.map { it.first }.average().toFloat()
+                val cy = pts.map { it.second }.average().toFloat()
+                drawPillLabel(cx, cy, displayLabel)
+            }
+
+            MeasurementType.PERIMETER -> {
+                if (pts.size < 2) return
+                cs.moveTo(pts[0].first, pts[0].second)
+                for (i in 1 until pts.size) cs.lineTo(pts[i].first, pts[i].second)
+                cs.stroke()
+
+                val cx = pts.map { it.first }.average().toFloat()
+                val cy = pts.map { it.second }.average().toFloat()
+                drawPillLabel(cx, cy, displayLabel)
+            }
+
+            MeasurementType.COUNT -> {
+                val (cx, cy) = pts.first()
+                val r = 9f
+                drawCircle(cs, cx, cy, r)
+                cs.setStrokingColor(1f, 1f, 1f)
+                cs.setLineWidth(1.2f)
+                drawCircleOutline(cs, cx, cy, r)
+                val text = sanitizeForPdf(item.label.ifBlank { "#${item.calculatedValue.toInt()}" }, font)
+                if (text.isNotBlank()) {
+                    val fontSize = 7.5f
+                    val textW = (font.getStringWidth(text) / 1000f) * fontSize
+                    cs.beginText()
+                    cs.setFont(font, fontSize)
+                    cs.setNonStrokingColor(1f, 1f, 1f)
+                    cs.newLineAtOffset(cx - textW / 2f, cy - fontSize * 0.3f)
+                    cs.showText(text)
+                    cs.endText()
+                }
+            }
+
+            MeasurementType.REVISION_CLOUD -> {
+                if (pts.size < 2) return
+                val left = min(pts[0].first, pts[1].first)
+                val right = max(pts[0].first, pts[1].first)
+                val bottom = min(pts[0].second, pts[1].second)
+                val top = max(pts[0].second, pts[1].second)
+                val w = right - left
+                val h = top - bottom
+                val radius = (minOf(w, h) * 0.14f).coerceIn(5f, 12f)
+
+                fun scallopedEdge(sx: Float, sy: Float, ex: Float, ey: Float) {
+                    val dx = ex - sx
+                    val dy = ey - sy
+                    val len = hypot(dx, dy)
+                    if (len < 1f) return
+                    val count = max(1, (len / (radius * 1.6f)).toInt())
+                    val stepX = dx / count
+                    val stepY = dy / count
+                    val ux = -dy / len
+                    val uy = dx / len
+                    cs.moveTo(sx, sy)
+                    for (i in 0 until count) {
+                        val p0x = sx + stepX * i
+                        val p0y = sy + stepY * i
+                        val p2x = sx + stepX * (i + 1)
+                        val p2y = sy + stepY * (i + 1)
+                        val cx = (p0x + p2x) / 2f + ux * radius * 0.9f
+                        val cy = (p0y + p2y) / 2f + uy * radius * 0.9f
+                        val cp1x = p0x + (2f / 3f) * (cx - p0x)
+                        val cp1y = p0y + (2f / 3f) * (cy - p0y)
+                        val cp2x = p2x + (2f / 3f) * (cx - p2x)
+                        val cp2y = p2y + (2f / 3f) * (cy - p2y)
+                        cs.curveTo(cp1x, cp1y, cp2x, cp2y, p2x, p2y)
+                    }
+                    cs.stroke()
+                }
+
+                scallopedEdge(left, top, right, top)
+                scallopedEdge(right, top, right, bottom)
+                scallopedEdge(right, bottom, left, bottom)
+                scallopedEdge(left, bottom, left, top)
+            }
+
+            MeasurementType.CALLOUT -> {
+                if (pts.size < 2) return
+                val (tipX, tipY) = pts[0]
+                val (ancX, ancY) = pts[1]
+                cs.moveTo(ancX, ancY)
+                cs.lineTo(tipX, tipY)
+                cs.stroke()
+
+                val angle = atan2(tipY - ancY, tipX - ancX)
+                val headLen = 8f
+                val spread = (28f * PI / 180.0)
+                val p1x = tipX - headLen * cos(angle - spread).toFloat()
+                val p1y = tipY - headLen * sin(angle - spread).toFloat()
+                val p2x = tipX - headLen * cos(angle + spread).toFloat()
+                val p2y = tipY - headLen * sin(angle + spread).toFloat()
+                cs.moveTo(tipX, tipY)
+                cs.lineTo(p1x, p1y)
+                cs.lineTo(p2x, p2y)
+                cs.closePath()
+                cs.fill()
+
+                val text = sanitizeForPdf(
+                    item.label.ifBlank { item.formattedText.ifBlank { "Callout" } },
+                    font
+                )
+                val fontSize = 8f
+                val textW = (font.getStringWidth(text) / 1000f) * fontSize
+                val padX = 5f
+                val boxW = textW + padX * 2f
+                val boxH = 13f
+                val boxLeft = ancX - boxW / 2f
+                val boxBottom = ancY - boxH / 2f
+                cs.addRect(boxLeft, boxBottom, boxW, boxH)
+                cs.fill()
+                cs.beginText()
+                cs.setFont(font, fontSize)
+                cs.setNonStrokingColor(1f, 1f, 1f)
+                cs.newLineAtOffset(boxLeft + padX, ancY - fontSize * 0.3f)
+                cs.showText(text)
+                cs.endText()
+            }
+        }
+    }
+
+    private fun sanitizeForPdf(text: String, font: PDFont): String {
+        val normalized = text
+            .replace("\r", "")
+            .replace("\n", " ")
+            .replace("\u2026", "...")
+        val sb = StringBuilder(normalized.length)
+        var i = 0
+        while (i < normalized.length) {
+            val cp = normalized.codePointAt(i)
+            val charCount = Character.charCount(cp)
+            val ch = String(Character.toChars(cp))
+            try {
+                font.encode(ch)
+                sb.append(ch)
+            } catch (_: Exception) {
+                if (cp == 0x09) {
+                    sb.append(' ')
+                } else if (!Character.isISOControl(cp) && Character.getType(cp) != Character.FORMAT.toInt()) {
+                    sb.append('?')
+                }
+            }
+            i += charCount
+        }
+        return sb.toString()
     }
 
     private fun colorToRgbFloats(color: Color): FloatArray {

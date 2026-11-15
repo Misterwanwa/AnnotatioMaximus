@@ -3,6 +3,9 @@ package com.annotatio.maximus.util
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import com.annotatio.maximus.model.Annotation
+import com.annotatio.maximus.model.DrawingPath
+import com.annotatio.maximus.model.PathPoint
+import com.annotatio.maximus.model.ShapeType
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -131,7 +134,7 @@ object ShapeRecognizer {
         val isClosed = isClosedShape(processedPoints)
         
         // Detect corners
-        val corners = detectCorners(processedPoints)
+        val corners = detectCorners(processedPoints, isClosed)
         
         // Recognize based on corners and shape properties
         return when {
@@ -155,7 +158,7 @@ object ShapeRecognizer {
             }
             
             // Rectangle detection (4 corners with ~90 degree angles)
-            corners.size == 4 && isRectangle(processedPoints, corners) -> {
+            corners.size == 4 && isRectangle(processedPoints, corners, isClosed) -> {
                 RecognizedShape.Rectangle(
                     width = bounds.width,
                     height = bounds.height,
@@ -202,82 +205,94 @@ object ShapeRecognizer {
     ): Annotation? {
         return when (shape) {
             is RecognizedShape.Line -> {
-                // Calculate normalized coordinates
-                val x = min(shape.start.x, shape.end.x)
-                val y = (shape.start.y + shape.end.y) / 2f
-                val width = abs(shape.end.x - shape.start.x)
-                
-                // For vertical lines, use different approach
-                if (width < 0.01f) {
-                    Annotation.Shape(
-                        pageIndex = pageIndex,
-                        type = com.annotatio.maximus.model.ShapeType.RECTANGLE,
-                        x = x - 0.005f,
-                        y = min(shape.start.y, shape.end.y),
-                        width = 0.01f,
-                        height = abs(shape.end.y - shape.start.y),
+                Annotation.Stroke(
+                    pageIndex = pageIndex,
+                    path = DrawingPath(
+                        points = listOf(
+                            PathPoint(
+                                shape.start.x.coerceIn(0f, 1f),
+                                shape.start.y.coerceIn(0f, 1f)
+                            ),
+                            PathPoint(
+                                shape.end.x.coerceIn(0f, 1f),
+                                shape.end.y.coerceIn(0f, 1f)
+                            )
+                        ),
                         color = color,
-                        strokeWidth = strokeWidth
+                        strokeWidth = strokeWidth,
+                        isHighlighter = false
                     )
-                } else {
-                    // Store as a stroke for now (lines aren't directly supported as shapes)
-                    null
-                }
+                )
             }
-            
+
             is RecognizedShape.Circle -> {
+                val x = (shape.center.x - shape.radius).coerceIn(0f, 0.99f)
+                val y = (shape.center.y - shape.radius).coerceIn(0f, 0.99f)
+                val w = (shape.radius * 2f).coerceIn(0.005f, 1f - x)
+                val h = (shape.radius * 2f).coerceIn(0.005f, 1f - y)
                 Annotation.Shape(
                     pageIndex = pageIndex,
-                    type = com.annotatio.maximus.model.ShapeType.CIRCLE,
-                    x = shape.center.x - shape.radius,
-                    y = shape.center.y - shape.radius,
-                    width = shape.radius * 2f,
-                    height = shape.radius * 2f,
+                    type = ShapeType.CIRCLE,
+                    x = x,
+                    y = y,
+                    width = w,
+                    height = h,
                     color = color,
                     strokeWidth = strokeWidth
                 )
             }
-            
+
             is RecognizedShape.Ellipse -> {
+                val x = (shape.center.x - shape.radiusX).coerceIn(0f, 0.99f)
+                val y = (shape.center.y - shape.radiusY).coerceIn(0f, 0.99f)
+                val w = (shape.radiusX * 2f).coerceIn(0.005f, 1f - x)
+                val h = (shape.radiusY * 2f).coerceIn(0.005f, 1f - y)
                 Annotation.Shape(
                     pageIndex = pageIndex,
-                    type = com.annotatio.maximus.model.ShapeType.RECTANGLE,
-                    x = shape.center.x - shape.radiusX,
-                    y = shape.center.y - shape.radiusY,
-                    width = shape.radiusX * 2f,
-                    height = shape.radiusY * 2f,
+                    type = ShapeType.RECTANGLE,
+                    x = x,
+                    y = y,
+                    width = w,
+                    height = h,
                     color = color,
                     strokeWidth = strokeWidth
                 )
             }
-            
+
             is RecognizedShape.Rectangle -> {
+                val x = shape.bounds.left.coerceIn(0f, 0.99f)
+                val y = shape.bounds.top.coerceIn(0f, 0.99f)
+                val w = shape.bounds.width.coerceIn(0.005f, 1f - x)
+                val h = shape.bounds.height.coerceIn(0.005f, 1f - y)
                 Annotation.Shape(
                     pageIndex = pageIndex,
-                    type = com.annotatio.maximus.model.ShapeType.RECTANGLE,
-                    x = shape.bounds.left,
-                    y = shape.bounds.top,
-                    width = shape.bounds.width,
-                    height = shape.bounds.height,
+                    type = ShapeType.RECTANGLE,
+                    x = x,
+                    y = y,
+                    width = w,
+                    height = h,
                     color = color,
                     strokeWidth = strokeWidth
                 )
             }
-            
+
             is RecognizedShape.Triangle -> {
-                // Create a triangle bounding box
+                val x = shape.bounds.left.coerceIn(0f, 0.99f)
+                val y = shape.bounds.top.coerceIn(0f, 0.99f)
+                val w = shape.bounds.width.coerceIn(0.005f, 1f - x)
+                val h = shape.bounds.height.coerceIn(0.005f, 1f - y)
                 Annotation.Shape(
                     pageIndex = pageIndex,
-                    type = com.annotatio.maximus.model.ShapeType.TRIANGLE,
-                    x = shape.bounds.left,
-                    y = shape.bounds.top,
-                    width = shape.bounds.width,
-                    height = shape.bounds.height,
+                    type = ShapeType.TRIANGLE,
+                    x = x,
+                    y = y,
+                    width = w,
+                    height = h,
                     color = color,
                     strokeWidth = strokeWidth
                 )
             }
-            
+
             else -> null
         }
     }
@@ -416,25 +431,41 @@ object ShapeRecognizer {
     /**
      * Detect corners in the point sequence
      */
-    private fun detectCorners(points: List<Offset>): List<Int> {
-        val corners = mutableListOf<Int>()
+    private fun detectCorners(points: List<Offset>, isClosed: Boolean = false): List<Int> {
+        val corners = mutableListOf<Pair<Int, Float>>()
         val windowSize = max(3, points.size / 20)
-        
+        val minSpacing = max(windowSize * 2, points.size / 12)
+        val maxInteriorAngle = 180f - CORNER_ANGLE_THRESHOLD
+
         for (i in windowSize until points.size - windowSize) {
             val prev = points[i - windowSize]
             val curr = points[i]
             val next = points[i + windowSize]
-            
+
             val angle = calculateAngle(prev, curr, next)
-            if (angle < CORNER_ANGLE_THRESHOLD) {
-                // Check if this corner is far enough from the previous one
-                if (corners.isEmpty() || i - corners.last() > windowSize) {
-                    corners.add(i)
+            if (angle < maxInteriorAngle) {
+                val last = corners.lastOrNull()
+                if (last == null || i - last.first > minSpacing) {
+                    corners.add(i to angle)
+                } else if (angle < last.second) {
+                    corners[corners.lastIndex] = i to angle
                 }
             }
         }
-        
-        return corners
+
+        if (isClosed && points.size > windowSize * 2 + 1) {
+            val prev = points[points.lastIndex - windowSize]
+            val curr = points[0]
+            val next = points[windowSize]
+            val seamAngle = calculateAngle(prev, curr, next)
+            val farFromFirst = corners.firstOrNull()?.let { it.first > minSpacing } ?: true
+            val farFromLast = corners.lastOrNull()?.let { (points.lastIndex - it.first) > minSpacing } ?: true
+            if (seamAngle < maxInteriorAngle && farFromFirst && farFromLast) {
+                corners.add(0, 0 to seamAngle)
+            }
+        }
+
+        return corners.map { it.first }
     }
     
     /**
@@ -472,17 +503,17 @@ object ShapeRecognizer {
     /**
      * Check if shape is a rectangle
      */
-    private fun isRectangle(points: List<Offset>, corners: List<Int>): Boolean {
+    private fun isRectangle(points: List<Offset>, corners: List<Int>, isClosed: Boolean = false): Boolean {
         if (corners.size != 4) return false
-        
+
+        val n = points.size
         // Check angles at corners (should be close to 90 degrees)
         val angles = corners.map { i ->
-            val prev = points[(i - 5).coerceAtLeast(0)]
-            val curr = points[i]
-            val next = points[(i + 5).coerceAtMost(points.size - 1)]
-            calculateAngle(prev, curr, next)
+            val prevIndex = if (isClosed) (i - 5 + n) % n else (i - 5).coerceAtLeast(0)
+            val nextIndex = if (isClosed) (i + 5) % n else (i + 5).coerceAtMost(n - 1)
+            calculateAngle(points[prevIndex], points[i], points[nextIndex])
         }
-        
+
         return angles.all { abs(it - 90) < 30 }
     }
     

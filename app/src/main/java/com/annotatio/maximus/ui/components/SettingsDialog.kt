@@ -119,6 +119,9 @@ fun SettingsDialog(
     onTranslatorLanguageChange: (String) -> Unit = {},
     appTheme: AppTheme = AppTheme.CUPERTINO_MINIMALIST,
     onAppThemeChange: (AppTheme) -> Unit = {},
+    hasDocument: Boolean = false,
+    onDeletePagesClick: () -> Unit = {},
+    onReorderPagesClick: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     var showButtonsSettings by remember { mutableStateOf(false) }
@@ -185,39 +188,55 @@ fun SettingsDialog(
                         )
                     }
 
+                    val pageActionTint = if (hasDocument) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    }
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { /* TODO: Handle page delete */ }
+                            .clickable(enabled = hasDocument) {
+                                onDismiss()
+                                onDeletePagesClick()
+                            }
                             .padding(vertical = 12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = "Seiten löschen",
-                            style = MaterialTheme.typography.bodyLarge
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = pageActionTint
                         )
                         Icon(
                             imageVector = Icons.Default.Delete,
-                            contentDescription = null
+                            contentDescription = null,
+                            tint = pageActionTint
                         )
                     }
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { /* TODO: Handle page reorder */ }
+                            .clickable(enabled = hasDocument) {
+                                onDismiss()
+                                onReorderPagesClick()
+                            }
                             .padding(vertical = 12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = "Seiten umordnen",
-                            style = MaterialTheme.typography.bodyLarge
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = pageActionTint
                         )
                         Icon(
                             imageVector = Icons.Default.SwapVert,
-                            contentDescription = null
+                            contentDescription = null,
+                            tint = pageActionTint
                         )
                     }
                 }

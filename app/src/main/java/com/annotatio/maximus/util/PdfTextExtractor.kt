@@ -61,63 +61,19 @@ object PdfTextExtractor {
                     text: String,
                     textPositions: MutableList<TextPosition>
                 ) {
-                    if (text.isBlank() || textPositions.isEmpty()) return
-                    
-                    // Group text positions by their Y coordinate (same line detection)
-                    val positionsByY = textPositions.groupBy { pos ->
-                        // Round Y to nearest 0.5 to handle slight variations
-                        kotlin.math.round(pos.y * 2) / 2
-                    }
-                    
-                    positionsByY.forEach { (_, positions) ->
-                        if (positions.isNotEmpty()) {
-                            val minX = positions.minOf { it.x }
-                            val maxX = positions.maxOf { it.x + it.width }
-                            val y = positions.first().y
-                            val height = positions.first().height
-                            val lineText = positions.joinToString("") { it.unicode }
-                            
-                            val textLine = TextLine(
-                                text = lineText,
-                                x = minX,
-                                y = y,  // PDFBox Y is baseline
-                                width = maxX - minX,
-                                height = height
-                            )
-                            
-                            pageLines.getOrPut(currentPage) { mutableListOf() }.add(textLine)
-                        }
-                    }
+                    appendLinesFromPositions(text, textPositions, pageLines.getOrPut(currentPage) { mutableListOf() })
                 }
-                
+
                 override fun endDocument(document: PDDocument) {
                     super.endDocument(document)
-                    
-                    // Convert to PageTextContent objects
-                    pageLines.forEach { (pageNum, lines) ->
-                        // Sort lines by Y position (top to bottom)
-                        val sortedLines = lines.sortedBy { it.y }
-                        
-                        // Normalize coordinates if page size is available
+
+                    // Merge fragments on the same baseline, then normalize per page
+                    pageLines.forEach { (pageNum, rawLines) ->
+                        val merged = mergeSameBaselineLines(rawLines)
                         val page = document.pages[pageNum]
                         val mediaBox = page.mediaBox
-                        
-                        val normalizedLines = if (mediaBox != null) {
-                            val pageWidth = mediaBox.width
-                            val pageHeight = mediaBox.height
-                            
-                            sortedLines.map { line ->
-                                line.copy(
-                                    x = (line.x / pageWidth).coerceIn(0f, 1f),
-                                    y = (line.y / pageHeight).coerceIn(0f, 1f),
-                                    width = (line.width / pageWidth).coerceIn(0f, 1f),
-                                    height = (line.height / pageHeight).coerceIn(0f, 1f)
-                                )
-                            }
-                        } else {
-                            sortedLines
-                        }
-                        
+                        val normalizedLines = normalizeTextLines(merged, mediaBox?.width, mediaBox?.height)
+
                         result[pageNum] = PageTextContent(
                             pageIndex = pageNum,
                             textLines = normalizedLines,
@@ -176,54 +132,19 @@ object PdfTextExtractor {
                     text: String,
                     textPositions: MutableList<TextPosition>
                 ) {
-                    if (text.isBlank() || textPositions.isEmpty()) return
-                    
-                    // Group by Y coordinate (same line)
-                    val positionsByY = textPositions.groupBy { pos ->
-                        kotlin.math.round(pos.y * 2) / 2
-                    }
-                    
-                    positionsByY.forEach { (_, positions) ->
-                        if (positions.isNotEmpty()) {
-                            val minX = positions.minOf { it.x }
-                            val maxX = positions.maxOf { it.x + it.width }
-                            val y = positions.first().y
-                            val height = positions.first().height
-                            val lineText = positions.joinToString("") { it.unicode }
-                            
-                            lines.add(TextLine(
-                                text = lineText,
-                                x = minX,
-                                y = y,
-                                width = maxX - minX,
-                                height = height
-                            ))
-                        }
-                    }
+                    appendLinesFromPositions(text, textPositions, lines)
                 }
             }
-            
+
             stripper.getText(document)
-            
-            // Sort lines by Y position
-            val sortedLines = stripper.lines.sortedBy { it.y }
-            
-            // Get page size for normalization
+
+            val mergedLines = mergeSameBaselineLines(stripper.lines)
             val page = document.getPage(pageIndex)
             val mediaBox = page.mediaBox
             val pageWidth = mediaBox.width
             val pageHeight = mediaBox.height
-            
-            // Normalize coordinates
-            val normalizedLines = sortedLines.map { line ->
-                line.copy(
-                    x = (line.x / pageWidth).coerceIn(0f, 1f),
-                    y = (line.y / pageHeight).coerceIn(0f, 1f),
-                    width = (line.width / pageWidth).coerceIn(0f, 1f),
-                    height = (line.height / pageHeight).coerceIn(0f, 1f)
-                )
-            }
-            
+            val normalizedLines = normalizeTextLines(mergedLines, pageWidth, pageHeight)
+
             PageTextContent(
                 pageIndex = pageIndex,
                 textLines = normalizedLines,
@@ -241,6 +162,99 @@ object PdfTextExtractor {
             try {
                 inputStream?.close()
             } catch (_: Exception) {}
+        }
+    }
+
+    private fun appendLinesFromPositions(
+        text: String,
+        textPositions: List<TextPosition>,
+        target: MutableList<TextLine>
+    ) {
+        if (text.isBlank() || textPositions.isEmpty()) return
+        val positionsByY = textPositions.groupBy { pos ->
+            kotlin.math.round(pos.y * 2f) / 2f
+        }
+        positionsByY.forEach { (_, positions) ->
+            if (positions.isNotEmpty()) {
+                val sorted = positions.sortedBy { it.x }
+                val minX = sorted.minOf { it.x }
+                val maxX = sorted.maxOf { it.x + it.width }
+                val y = sorted.first().y
+                val height = sorted.maxOf { it.height }
+                val lineText = sorted.joinToString("") { it.unicode }
+                target.add(
+                    TextLine(
+                        text = lineText,
+                        x = minX,
+                        y = y,
+                        width = (maxX - minX).coerceAtLeast(0f),
+                        height = height
+                    )
+                )
+            }
+        }
+    }
+
+    private fun mergeSameBaselineLines(rawLines: List<TextLine>): List<TextLine> {
+        if (rawLines.isEmpty()) return emptyList()
+        val sortedByY = rawLines.sortedBy { it.y }
+        val buckets = mutableListOf<MutableList<TextLine>>()
+
+        for (line in sortedByY) {
+            val currentBucket = buckets.lastOrNull()
+            val tolerance = (line.height.takeIf { it > 0f } ?: 10f) * 0.35f
+            if (currentBucket != null && kotlin.math.abs(line.y - currentBucket.first().y) <= tolerance.coerceAtLeast(2f)) {
+                currentBucket.add(line)
+            } else {
+                buckets.add(mutableListOf(line))
+            }
+        }
+
+        return buckets.map { group ->
+            val ordered = group.sortedBy { it.x }
+            val minX = ordered.minOf { it.x }
+            val maxX = ordered.maxOf { it.x + it.width }
+            val avgY = ordered.map { it.y }.average().toFloat()
+            val maxH = ordered.maxOf { it.height }
+            val sb = StringBuilder()
+            var prevRight = Float.NaN
+            for (frag in ordered) {
+                val text = frag.text
+                if (sb.isNotEmpty() && !prevRight.isNaN()) {
+                    val gap = frag.x - prevRight
+                    val spaceThreshold = (frag.height.takeIf { it > 0f } ?: 8f) * 0.2f
+                    if (gap > spaceThreshold && !sb.endsWith(" ") && !text.startsWith(" ")) {
+                        sb.append(' ')
+                    }
+                }
+                sb.append(text)
+                prevRight = frag.x + frag.width
+            }
+            TextLine(
+                text = sb.toString(),
+                x = minX,
+                y = avgY,
+                width = (maxX - minX).coerceAtLeast(0f),
+                height = maxH
+            )
+        }
+    }
+
+    private fun normalizeTextLines(
+        lines: List<TextLine>,
+        pageWidth: Float?,
+        pageHeight: Float?
+    ): List<TextLine> {
+        if (pageWidth == null || pageHeight == null || pageWidth <= 0f || pageHeight <= 0f) {
+            return lines
+        }
+        return lines.map { line ->
+            line.copy(
+                x = (line.x / pageWidth).coerceIn(0f, 1f),
+                y = (line.y / pageHeight).coerceIn(0f, 1f),
+                width = (line.width / pageWidth).coerceIn(0f, 1f),
+                height = (line.height / pageHeight).coerceIn(0f, 1f)
+            )
         }
     }
 }

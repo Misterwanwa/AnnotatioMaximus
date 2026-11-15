@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -14,8 +15,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -36,6 +43,24 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import com.annotatio.maximus.model.AnnotationType
 import kotlin.math.min
+
+private fun toolDisplayName(tool: AnnotationType): String = when (tool) {
+    AnnotationType.PEN -> "Pinsel"
+    AnnotationType.HIGHLIGHTER -> "Marker"
+    AnnotationType.UNDERLINE -> "Unterstreichen"
+    AnnotationType.STRIKETHROUGH -> "Durchstreichen"
+    AnnotationType.TABLE -> "Tabelle"
+    AnnotationType.TEXT_NOTE -> "Notiz"
+    AnnotationType.TEXT_BOX -> "Textfeld"
+    AnnotationType.COMMENT -> "Kommentar"
+    AnnotationType.LINK -> "Link"
+    AnnotationType.CIRCLE -> "Kreis"
+    AnnotationType.SQUARE -> "Quadrat"
+    AnnotationType.RECTANGLE -> "Rechteck"
+    AnnotationType.TRIANGLE -> "Dreieck"
+    AnnotationType.SMART_GRAPHIC -> "Smarte Grafik"
+    else -> tool.name
+}
 
 private val presetColors = listOf(
     Color.Black,
@@ -60,9 +85,18 @@ fun ToolOptionsPanel(
     strokeWidth: Float,
     onColorSelected: (Color) -> Unit,
     onStrokeWidthChanged: (Float) -> Unit,
+    onCloseTool: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    if (activeTool == null || activeTool == AnnotationType.ERASER || activeTool == AnnotationType.HAND) return
+    if (activeTool == null || activeTool in listOf(
+            AnnotationType.ERASER,
+            AnnotationType.HAND,
+            AnnotationType.SELECT,
+            AnnotationType.LASSO,
+            AnnotationType.IMAGE,
+            AnnotationType.SIGNATURE
+        )
+    ) return
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -76,9 +110,25 @@ fun ToolOptionsPanel(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Start,
             modifier = Modifier
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 6.dp)
                 .height(40.dp)
         ) {
+            // Compact tool title pill
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer
+            ) {
+                Text(
+                    text = toolDisplayName(activeTool),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+
             // Color presets (highlight colors for highlighter, standard for everything else)
             val colors = if (activeTool == AnnotationType.HIGHLIGHTER) highlightColors else presetColors
             colors.forEach { color ->
@@ -100,20 +150,63 @@ fun ToolOptionsPanel(
                 onClick = { showColorPicker = true }
             )
 
-            // Stroke width slider (for pen and highlighter)
-            if (activeTool == AnnotationType.PEN || activeTool == AnnotationType.HIGHLIGHTER) {
-                Spacer(modifier = Modifier.width(16.dp))
+            // Stroke width slider + live dot preview (for pen, highlighter, and shapes)
+            if (activeTool in listOf(
+                    AnnotationType.PEN,
+                    AnnotationType.HIGHLIGHTER,
+                    AnnotationType.CIRCLE,
+                    AnnotationType.SQUARE,
+                    AnnotationType.RECTANGLE,
+                    AnnotationType.TRIANGLE
+                )
+            ) {
+                Spacer(modifier = Modifier.width(14.dp))
                 Text(
                     text = "Stärke:",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val previewSize = (strokeWidth + 3f).coerceIn(4f, 22f).dp
+                    Box(
+                        modifier = Modifier
+                            .size(previewSize)
+                            .clip(CircleShape)
+                            .background(selectedColor)
+                    )
+                }
+                Spacer(modifier = Modifier.width(6.dp))
                 Slider(
                     value = strokeWidth,
                     onValueChange = onStrokeWidthChanged,
                     valueRange = 1f..20f,
-                    modifier = Modifier.width(160.dp)
+                    modifier = Modifier.width(140.dp)
+                )
+                Text(
+                    text = "${strokeWidth.toInt()}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.width(22.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+            IconButton(
+                onClick = onCloseTool,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Werkzeug beenden",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }

@@ -100,6 +100,7 @@ fun PdfCompareViewer(
                             PdfViewer(
                                 pdfUri = uriA,
                                 modifier = Modifier.fillMaxSize(),
+                                currentPage = pageA,
                                 onPageChanged = { page, _ ->
                                     pageA = page
                                     if (isSyncZoomEnabled) pageB = page
@@ -120,6 +121,7 @@ fun PdfCompareViewer(
                             PdfViewer(
                                 pdfUri = uriB,
                                 modifier = Modifier.fillMaxSize(),
+                                currentPage = pageB,
                                 onPageChanged = { page, _ ->
                                     pageB = page
                                     if (isSyncZoomEnabled) pageA = page
@@ -145,7 +147,15 @@ fun PdfCompareViewer(
                         val splitW = totalW * splitRatio
 
                         // Revision B full
-                        PdfViewer(pdfUri = uriB, modifier = Modifier.fillMaxSize())
+                        PdfViewer(
+                            pdfUri = uriB,
+                            modifier = Modifier.fillMaxSize(),
+                            currentPage = pageB,
+                            onPageChanged = { page, _ ->
+                                pageB = page
+                                if (isSyncZoomEnabled) pageA = page
+                            }
+                        )
 
                         // Revision A clipped to splitW
                         Box(
@@ -156,7 +166,12 @@ fun PdfCompareViewer(
                         ) {
                             PdfViewer(
                                 pdfUri = uriA,
-                                modifier = Modifier.size(width = totalW, height = totalH)
+                                modifier = Modifier.size(width = totalW, height = totalH),
+                                currentPage = pageA,
+                                onPageChanged = { page, _ ->
+                                    pageA = page
+                                    if (isSyncZoomEnabled) pageB = page
+                                }
                             )
                         }
 
@@ -197,13 +212,29 @@ fun PdfCompareViewer(
                     Box(modifier = Modifier.fillMaxSize()) {
                         // Underlay: Revision A with Red tint
                         Box(modifier = Modifier.fillMaxSize()) {
-                            PdfViewer(pdfUri = uriA, modifier = Modifier.fillMaxSize())
+                            PdfViewer(
+                                pdfUri = uriA,
+                                modifier = Modifier.fillMaxSize(),
+                                currentPage = pageA,
+                                onPageChanged = { page, _ ->
+                                    pageA = page
+                                    if (isSyncZoomEnabled) pageB = page
+                                }
+                            )
                             Box(modifier = Modifier.fillMaxSize().background(Color(0xFFE53935).copy(alpha = 0.25f)))
                         }
 
                         // Overlay: Revision B with Green tint and half transparency
                         Box(modifier = Modifier.fillMaxSize().alpha(0.55f)) {
-                            PdfViewer(pdfUri = uriB, modifier = Modifier.fillMaxSize())
+                            PdfViewer(
+                                pdfUri = uriB,
+                                modifier = Modifier.fillMaxSize(),
+                                currentPage = pageB,
+                                onPageChanged = { page, _ ->
+                                    pageB = page
+                                    if (isSyncZoomEnabled) pageA = page
+                                }
+                            )
                             Box(modifier = Modifier.fillMaxSize().background(Color(0xFF43A047).copy(alpha = 0.25f)))
                         }
                     }

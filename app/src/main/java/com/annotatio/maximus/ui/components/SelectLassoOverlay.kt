@@ -16,16 +16,20 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.CopyAll
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,7 +43,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import android.net.Uri
@@ -49,24 +52,29 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import com.annotatio.maximus.model.Annotation
 import com.annotatio.maximus.model.AnnotationType
+import com.annotatio.maximus.model.MeasurementItem
 import com.annotatio.maximus.model.PathPoint
+import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.sqrt
+import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.sin
 
 @Composable
 fun SelectLassoOverlay(
     annotations: List<Annotation>,
     pageInfo: PdfPageInfo,
     activeTool: AnnotationType,
-    onUpdateAnnotation: (Annotation) -> Unit,
+    onUpdateAnnotations: (List<Annotation>) -> Unit,
     onRemoveAnnotations: (List<String>) -> Unit,
     onDuplicateAnnotations: (List<Annotation>) -> Unit,
+    onCopyAnnotation: (Annotation) -> Unit = {},
+    takeoffItems: List<MeasurementItem> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var lassoPoints by remember { mutableStateOf<List<Offset>>(emptyList()) }
-    var dragStart by remember { mutableStateOf<Offset?>(null) }
-    var moveStart by remember { mutableStateOf<Offset?>(null) }
+    var dragDeltaNorm by remember { mutableStateOf(Offset.Zero) }
     val context = LocalContext.current
 
     val signatureBitmapCache = remember(annotations) {
@@ -95,113 +103,166 @@ fun SelectLassoOverlay(
         cache
     }
 
-    // When tool changes, clear selection
-    val toolKey = activeTool
-    remember(toolKey) { selectedIds = emptySet() }
+    // Clear selection cleanly whenever the active tool changes
+    LaunchedEffect(activeTool) {
+        selectedIds = emptySet()
+        lassoPoints = emptyList()
+        dragDeltaNorm = Offset.Zero
+    }
 
     val density = LocalDensity.current
 
     val selectedAnnotations = annotations.filter { it.id in selectedIds }
 
-    // Compute bounding box of all selected annotations in screen coords
-    val selectionBounds: Rect? = if (selectedIds.isNotEmpty()) {
+    // Compute bounding box of all selected annotations in screen coords (shifted by live drag delta)
+    val baseSelectionBounds: Rect? = if (selectedIds.isNotEmpty()) {
         computeSelectionBoundsScreen(selectedAnnotations, pageInfo)
     } else null
+    val selectionBounds: Rect? = baseSelectionBounds?.translate(
+        Offset(dragDeltaNorm.x * pageInfo.pageWidth, dragDeltaNorm.y * pageInfo.pageHeight)
+    )
+
+    val latestAnnotations by rememberUpdatedState(annotations)
+    val latestPageInfo by rememberUpdatedState(pageInfo)
+    val latestSelectedIds by rememberUpdatedState(selectedIds)
+    val latestSelectionBounds by rememberUpdatedState(selectionBounds)
+    val latestOnUpdateAnnotations by rememberUpdatedState(onUpdateAnnotations)
 
     val gestureModifier = when (activeTool) {
         AnnotationType.SELECT -> Modifier
-            .pointerInput(annotations, pageInfo, selectedIds) {
-                // Single unified gesture handler: tap to select, immediate drag to move
+            .pointerInput(activeTool) {
                 awaitEachGesture {
                     val down = awaitFirstDown(pass = PointerEventPass.Main)
                     val downPos = down.position
-                    val normalized = screenToNorm(downPos, pageInfo)
-                    val hit = annotations.findLast { annotation ->
-                        annotationContains(annotation, normalized, pageInfo)
+                    val info = latestPageInfo
+                    val normalized = screenToNorm(downPos, info)
+
+                    val currentlySelected = latestSelectedIds
+                    val insideExistingSelection = currentlySelected.isNotEmpty() &&
+                        (latestSelectionBounds?.contains(downPos) == true)
+
+                    val hit = if (insideExistingSelection) {
+                        null
+                    } else {
+                        latestAnnotations.findLast { annotation ->
+                            annotationContains(annotation, normalized, info)
+                        }
                     }
 
-                    // Select on down (immediate feedback)
-                    val isMoving = hit != null && hit.id in selectedIds
-                    if (hit != null && hit.id !in selectedIds) {
-                        selectedIds = setOf(hit.id)
+                    val canMove = if (insideExistingSelection) {
+                        true
+                    } else if (hit != null) {
+                        if (hit.id !in currentlySelected) {
+                            selectedIds = setOf(hit.id)
+                        }
+                        true
+                    } else {
+                        false
                     }
 
-                    // Now track subsequent pointer events
-                    var isDragging = false
-                    var lastPos = downPos
-                    var accumulatedDx = 0f
-                    var accumulatedDy = 0f
-                    
+                    var hasDragged = false
+                    var latestPos = downPos
+
                     do {
                         val event = awaitPointerEvent(pass = PointerEventPass.Main)
                         val pointer = event.changes.firstOrNull() ?: break
                         if (!pointer.pressed) break
 
-                        val delta = pointer.position - lastPos
-                        val moved = sqrt(delta.x * delta.x + delta.y * delta.y)
-
-                        if ((isMoving || hit != null && hit.id in selectedIds)) {
-                            isDragging = true
-                            pointer.consume()
-                            
-                            // Accumulate movement
-                            accumulatedDx += delta.x / pageInfo.pageWidth
-                            accumulatedDy += delta.y / pageInfo.pageHeight
-                            
-                            // Update position with accumulated delta
-                            if (moved > 0.5f) {
-                                val currentSelected = annotations.filter { it.id in selectedIds }
-                                currentSelected.forEach { annotation ->
-                                    onUpdateAnnotation(moveAnnotation(annotation, accumulatedDx, accumulatedDy))
-                                }
-                                // Reset accumulation after applying
-                                accumulatedDx = 0f
-                                accumulatedDy = 0f
-                                lastPos = pointer.position
+                        latestPos = pointer.position
+                        if (canMove && info.pageWidth > 0f && info.pageHeight > 0f) {
+                            val totalDeltaPx = latestPos - downPos
+                            if (hypot(totalDeltaPx.x, totalDeltaPx.y) > 4f) {
+                                hasDragged = true
+                                pointer.consume()
+                                dragDeltaNorm = Offset(
+                                    totalDeltaPx.x / info.pageWidth,
+                                    totalDeltaPx.y / info.pageHeight
+                                )
                             }
                         }
                     } while (true)
-                    
-                    // Apply any remaining accumulated movement at the end
-                    if (accumulatedDx != 0f || accumulatedDy != 0f) {
-                        val currentSelected = annotations.filter { it.id in selectedIds }
-                        currentSelected.forEach { annotation ->
-                            onUpdateAnnotation(moveAnnotation(annotation, accumulatedDx, accumulatedDy))
-                        }
-                    }
 
-                    // If no drag occurred and nothing was hit, deselect
-                    if (!isDragging && hit == null) {
+                    val committedDelta = dragDeltaNorm
+                    dragDeltaNorm = Offset.Zero
+
+                    if (hasDragged && (abs(committedDelta.x) > 0.001f || abs(committedDelta.y) > 0.001f)) {
+                        val activeIds = selectedIds
+                        val updated = latestAnnotations
+                            .filter { it.id in activeIds }
+                            .map { moveAnnotation(it, committedDelta.x, committedDelta.y) }
+                        if (updated.isNotEmpty()) {
+                            latestOnUpdateAnnotations(updated)
+                        }
+                    } else if (!hasDragged && !insideExistingSelection && hit == null) {
                         selectedIds = emptySet()
                     }
                 }
             }
 
         AnnotationType.LASSO -> Modifier
-            .pointerInput(annotations, pageInfo) {
-                detectDragGestures(
-                    onDragStart = { offset ->
-                        lassoPoints = listOf(offset)
-                        dragStart = offset
+            .pointerInput(activeTool) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(pass = PointerEventPass.Main)
+                    val downPos = down.position
+                    val info = latestPageInfo
+                    val currentlySelected = latestSelectedIds
+                    val dragExistingSelection = currentlySelected.isNotEmpty() &&
+                        (latestSelectionBounds?.contains(downPos) == true)
+
+                    if (dragExistingSelection) {
+                        var hasDragged = false
+                        do {
+                            val event = awaitPointerEvent(pass = PointerEventPass.Main)
+                            val pointer = event.changes.firstOrNull() ?: break
+                            if (!pointer.pressed) break
+                            val totalDeltaPx = pointer.position - downPos
+                            if (hypot(totalDeltaPx.x, totalDeltaPx.y) > 4f && info.pageWidth > 0f && info.pageHeight > 0f) {
+                                hasDragged = true
+                                pointer.consume()
+                                dragDeltaNorm = Offset(
+                                    totalDeltaPx.x / info.pageWidth,
+                                    totalDeltaPx.y / info.pageHeight
+                                )
+                            }
+                        } while (true)
+
+                        val committedDelta = dragDeltaNorm
+                        dragDeltaNorm = Offset.Zero
+                        if (hasDragged && (abs(committedDelta.x) > 0.001f || abs(committedDelta.y) > 0.001f)) {
+                            val updated = latestAnnotations
+                                .filter { it.id in currentlySelected }
+                                .map { moveAnnotation(it, committedDelta.x, committedDelta.y) }
+                            if (updated.isNotEmpty()) {
+                                latestOnUpdateAnnotations(updated)
+                            }
+                        }
+                    } else {
+                        lassoPoints = listOf(downPos)
                         selectedIds = emptySet()
-                    },
-                    onDrag = { change, _ ->
-                        change.consume()
-                        lassoPoints = lassoPoints + change.position
-                    },
-                    onDragEnd = {
-                        // Hit-test all annotations against the lasso polygon
-                        val hitIds = annotations.filter { annotation ->
-                            val center = annotationCenterScreen(annotation, pageInfo)
-                            center != null && pointInPolygon(center, lassoPoints)
-                        }.map { it.id }.toSet()
-                        selectedIds = hitIds
-                        lassoPoints = emptyList()
-                    },
-                    onDragCancel = {
+                        var isDraggingLasso = false
+                        do {
+                            val event = awaitPointerEvent(pass = PointerEventPass.Main)
+                            val pointer = event.changes.firstOrNull() ?: break
+                            if (!pointer.pressed) break
+                            if ((pointer.position - downPos).getDistance() > 6f) {
+                                isDraggingLasso = true
+                            }
+                            pointer.consume()
+                            lassoPoints = lassoPoints + pointer.position
+                        } while (true)
+
+                        if (isDraggingLasso && lassoPoints.size >= 3) {
+                            val hitIds = latestAnnotations.filter { annotation ->
+                                val center = annotationCenterScreen(annotation, info)
+                                center != null && pointInPolygon(center, lassoPoints)
+                            }.map { it.id }.toSet()
+                            selectedIds = hitIds
+                        } else {
+                            selectedIds = emptySet()
+                        }
                         lassoPoints = emptyList()
                     }
-                )
+                }
             }
 
         else -> Modifier
@@ -213,15 +274,30 @@ fun SelectLassoOverlay(
                 .fillMaxSize()
                 .then(gestureModifier)
         ) {
-            // Draw all annotations
+            // Draw all annotations (previewing live drag offset for selected ones)
             for (annotation in annotations) {
-                drawAnnotation(annotation, pageInfo, imageBitmapCache, signatureBitmapCache)
+                val rendered = if (annotation.id in selectedIds && dragDeltaNorm != Offset.Zero) {
+                    moveAnnotation(annotation, dragDeltaNorm.x, dragDeltaNorm.y)
+                } else {
+                    annotation
+                }
+                drawAnnotation(rendered, pageInfo, imageBitmapCache, signatureBitmapCache)
+            }
+
+            // Keep AEC measurements visible during selection/lasso
+            for (item in takeoffItems) {
+                drawMeasurement(item, pageInfo)
             }
 
             // Draw selection highlight
             for (id in selectedIds) {
                 val annotation = annotations.find { it.id == id } ?: continue
-                val bounds = annotationBoundsScreen(annotation, pageInfo) ?: continue
+                val rendered = if (dragDeltaNorm != Offset.Zero) {
+                    moveAnnotation(annotation, dragDeltaNorm.x, dragDeltaNorm.y)
+                } else {
+                    annotation
+                }
+                val bounds = annotationBoundsScreen(rendered, pageInfo) ?: continue
                 drawRect(
                     color = Color(0x441565C0),
                     topLeft = Offset(bounds.left, bounds.top),
@@ -262,16 +338,17 @@ fun SelectLassoOverlay(
         }
 
         // Context menu above selection
-        if (selectedIds.isNotEmpty() && selectionBounds != null) {
-            val menuX = with(density) { selectionBounds.center.x.toDp() - 80.dp }
-            val menuY = with(density) { (selectionBounds.top - 48.dp.toPx()).coerceAtLeast(0f).toDp() }
+        if (selectedIds.isNotEmpty() && selectionBounds != null && dragDeltaNorm == Offset.Zero) {
+            val menuX = with(density) { (selectionBounds.center.x.toDp() - 96.dp).coerceAtLeast(8.dp) }
+            val menuY = with(density) { (selectionBounds.top - 52.dp.toPx()).coerceAtLeast(8f).toDp() }
+            val selectedStrokes = selectedAnnotations.filterIsInstance<Annotation.Stroke>()
 
             Surface(
                 modifier = Modifier
                     .offset(x = menuX, y = menuY),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(10.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
-                shadowElevation = 4.dp
+                shadowElevation = 6.dp
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
@@ -287,7 +364,7 @@ fun SelectLassoOverlay(
                             tint = MaterialTheme.colorScheme.error
                         )
                     }
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(2.dp))
                     IconButton(onClick = {
                         onDuplicateAnnotations(selectedAnnotations)
                         selectedIds = emptySet()
@@ -298,19 +375,74 @@ fun SelectLassoOverlay(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    if (selectedIds.size == 1) {
-                        Spacer(modifier = Modifier.width(4.dp))
-                        // Move hint icon
-                        Icon(
-                            Icons.Default.DragHandle,
-                            contentDescription = "Verschieben (ziehen)",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(8.dp)
-                        )
+                    if (selectedStrokes.isNotEmpty()) {
+                        Spacer(modifier = Modifier.width(2.dp))
+                        IconButton(onClick = {
+                            val rotated = rotateStrokesBy15Deg(selectedStrokes, pageInfo)
+                            onUpdateAnnotations(rotated)
+                        }) {
+                            Icon(
+                                Icons.Default.RotateRight,
+                                contentDescription = "Um 15° drehen",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
+                    if (selectedAnnotations.size == 1 && selectedAnnotations.first() is Annotation.Stroke) {
+                        Spacer(modifier = Modifier.width(2.dp))
+                        IconButton(onClick = {
+                            onCopyAnnotation(selectedAnnotations.first())
+                        }) {
+                            Icon(
+                                Icons.Default.CopyAll,
+                                contentDescription = "In Zwischenablage kopieren",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Icon(
+                        Icons.Default.DragHandle,
+                        contentDescription = "Verschieben (ziehen)",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(8.dp)
+                    )
                 }
             }
         }
+    }
+}
+
+private fun rotateStrokesBy15Deg(
+    strokes: List<Annotation.Stroke>,
+    pageInfo: PdfPageInfo
+): List<Annotation.Stroke> {
+    val allPoints = strokes.flatMap { it.path.points }
+    if (allPoints.isEmpty()) return strokes
+    val minX = allPoints.minOf { it.x }
+    val maxX = allPoints.maxOf { it.x }
+    val minY = allPoints.minOf { it.y }
+    val maxY = allPoints.maxOf { it.y }
+    val cx = (minX + maxX) / 2f
+    val cy = (minY + maxY) / 2f
+    val aspectW = if (pageInfo.pageWidth > 0f) pageInfo.pageWidth else 1f
+    val aspectH = if (pageInfo.pageHeight > 0f) pageInfo.pageHeight else 1f
+    val rad = (15.0 * PI / 180.0)
+    val cosA = cos(rad).toFloat()
+    val sinA = sin(rad).toFloat()
+
+    return strokes.map { stroke ->
+        val rotatedPoints = stroke.path.points.map { pt ->
+            val dx = (pt.x - cx) * aspectW
+            val dy = (pt.y - cy) * aspectH
+            val rx = dx * cosA - dy * sinA
+            val ry = dx * sinA + dy * cosA
+            PathPoint(
+                x = (cx + rx / aspectW).coerceIn(0f, 1f),
+                y = (cy + ry / aspectH).coerceIn(0f, 1f)
+            )
+        }
+        stroke.copy(path = stroke.path.copy(points = rotatedPoints))
     }
 }
 

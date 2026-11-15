@@ -26,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -37,6 +38,7 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
@@ -49,21 +51,29 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import com.annotatio.maximus.model.AecToolType
 import com.annotatio.maximus.model.Annotation
 import com.annotatio.maximus.model.AnnotationType
 import com.annotatio.maximus.model.DrawingPath
+import com.annotatio.maximus.model.DrawingScale
+import com.annotatio.maximus.model.MeasurementItem
+import com.annotatio.maximus.model.MeasurementType
 import com.annotatio.maximus.model.PageTextContent
 import com.annotatio.maximus.model.PathPoint
 import com.annotatio.maximus.model.ShapeType
 import com.annotatio.maximus.model.SmartGraphicType
 import com.annotatio.maximus.model.TextBoxFont
+import com.annotatio.maximus.util.MeasureCalculator
 import com.annotatio.maximus.util.RecognizedShape
 import com.annotatio.maximus.util.ShapeRecognizer
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 
@@ -88,6 +98,16 @@ fun AnnotationCanvas(
     pendingSmartGraphicType: SmartGraphicType = SmartGraphicType.MIND_MAP,
     externalImageCache: Map<String, ImageBitmap?>? = null,
     pageTextContent: PageTextContent? = null,
+    currentAecTool: AecToolType = AecToolType.NONE,
+    drawingScale: DrawingScale = DrawingScale(),
+    takeoffItems: List<MeasurementItem> = emptyList(),
+    pendingAreaPoints: List<Offset> = emptyList(),
+    onAreaPointAdded: (Offset) -> Unit = {},
+    onCompleteAreaPolygon: () -> Unit = {},
+    onAddTakeoffItem: (MeasurementItem) -> Unit = {},
+    onRemoveTakeoffItem: (String) -> Unit = {},
+    onRequestCallout: (startNorm: Offset, endNorm: Offset) -> Unit = { _, _ -> },
+    onMeasuredPixelLength: (Float) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -159,151 +179,266 @@ fun AnnotationCanvas(
         }
     }
 
-    val gestureModifier = when (activeTool) {
+    val pageTakeoffItems = remember(takeoffItems, currentPageIndex) {
+        takeoffItems.filter { it.pageIndex == currentPageIndex }
+    }
+    val latestPageInfo by rememberUpdatedState(pageInfo)
+    val latestPendingAreaPoints by rememberUpdatedState(pendingAreaPoints)
+    val latestTakeoffItems by rememberUpdatedState(takeoffItems)
+    val latestPageTakeoffItems by rememberUpdatedState(pageTakeoffItems)
+    val latestDrawingScale by rememberUpdatedState(drawingScale)
+    val latestOnAddTakeoffItem by rememberUpdatedState(onAddTakeoffItem)
+    val latestOnRemoveTakeoffItem by rememberUpdatedState(onRemoveTakeoffItem)
+    val latestOnAreaPointAdded by rememberUpdatedState(onAreaPointAdded)
+    val latestOnCompleteAreaPolygon by rememberUpdatedState(onCompleteAreaPolygon)
+    val latestOnRequestCallout by rememberUpdatedState(onRequestCallout)
+    val latestOnMeasuredPixelLength by rememberUpdatedState(onMeasuredPixelLength)
+
+    val gestureModifier = if (activeTool != AnnotationType.ERASER && currentAecTool != AecToolType.NONE) {
+        when (currentAecTool) {
+            AecToolType.DISTANCE, AecToolType.REVISION_CLOUD, AecToolType.CALLOUT -> {
+                Modifier.pointerInput(currentAecTool, currentPageIndex, penColor) {
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            dragStart = offset
+                            dragCurrent = offset
+                        },
+                        onDrag = { change, _ ->
+                            change.consume()
+                            dragCurrent = change.position
+                        },
+                        onDragEnd = {
+                            val start = dragStart
+                            val end = dragCurrent
+                            val info = latestPageInfo
+                            if (start != null && end != null && info.pageWidth > 0f && info.pageHeight > 0f) {
+                                val sNorm = screenToNormalized(start, info)
+                                val eNorm = screenToNormalized(end, info)
+                                val minX = minOf(sNorm.x, eNorm.x)
+                                val minY = minOf(sNorm.y, eNorm.y)
+                                val maxX = maxOf(sNorm.x, eNorm.x)
+                                val maxY = maxOf(sNorm.y, eNorm.y)
+
+                                when (currentAecTool) {
+                                    AecToolType.DISTANCE -> {
+                                        val p1Norm = Offset(sNorm.x, sNorm.y)
+                                        val p2Norm = Offset(eNorm.x, eNorm.y)
+                                        val pixelDist = kotlin.math.hypot(
+                                            (p2Norm.x - p1Norm.x) * info.pdfPointWidth,
+                                            (p2Norm.y - p1Norm.y) * info.pdfPointHeight
+                                        )
+                                        if (pixelDist > 3f) {
+                                            latestOnMeasuredPixelLength(pixelDist)
+                                            val scale = latestDrawingScale
+                                            val realValue = MeasureCalculator.calculateDistance(
+                                                p1Norm,
+                                                p2Norm,
+                                                info.pdfPointWidth,
+                                                info.pdfPointHeight,
+                                                scale
+                                            )
+                                            val formatted = MeasureCalculator.formatMeasurement(
+                                                MeasurementType.DISTANCE,
+                                                realValue,
+                                                scale.unit
+                                            )
+                                            latestOnAddTakeoffItem(
+                                                MeasurementItem(
+                                                    pageIndex = currentPageIndex,
+                                                    type = MeasurementType.DISTANCE,
+                                                    points = listOf(p1Norm, p2Norm),
+                                                    calculatedValue = realValue,
+                                                    unit = scale.unit,
+                                                    formattedText = formatted,
+                                                    label = formatted
+                                                )
+                                            )
+                                        }
+                                    }
+                                    AecToolType.REVISION_CLOUD -> {
+                                        if ((maxX - minX) > 0.02f && (maxY - minY) > 0.02f) {
+                                            latestOnAddTakeoffItem(
+                                                MeasurementItem(
+                                                    pageIndex = currentPageIndex,
+                                                    type = MeasurementType.REVISION_CLOUD,
+                                                    points = listOf(Offset(minX, minY), Offset(maxX, maxY)),
+                                                    calculatedValue = 1f,
+                                                    unit = "",
+                                                    formattedText = MeasureCalculator.formatMeasurement(
+                                                        MeasurementType.REVISION_CLOUD,
+                                                        1f,
+                                                        ""
+                                                    ),
+                                                    label = "Rev-Wolke"
+                                                )
+                                            )
+                                        }
+                                    }
+                                    AecToolType.CALLOUT -> {
+                                        if ((end - start).getDistance() > 20f) {
+                                            latestOnRequestCallout(
+                                                Offset(sNorm.x, sNorm.y),
+                                                Offset(eNorm.x, eNorm.y)
+                                            )
+                                        }
+                                    }
+                                    else -> {}
+                                }
+                            }
+                            dragStart = null
+                            dragCurrent = null
+                        },
+                        onDragCancel = {
+                            dragStart = null
+                            dragCurrent = null
+                        }
+                    )
+                }
+            }
+
+            AecToolType.AREA -> {
+                Modifier.pointerInput(currentAecTool, currentPageIndex) {
+                    detectTapGestures { offset ->
+                        val info = latestPageInfo
+                        val norm = screenToNormalized(offset, info)
+                        val existingPts = latestPendingAreaPoints
+                        if (existingPts.size >= 3) {
+                            val firstScreen = normalizedToScreen(
+                                PathPoint(existingPts.first().x, existingPts.first().y),
+                                info
+                            )
+                            if ((offset - firstScreen).getDistance() < 36f) {
+                                latestOnCompleteAreaPolygon()
+                                return@detectTapGestures
+                            }
+                        }
+                        latestOnAreaPointAdded(Offset(norm.x, norm.y))
+                    }
+                }
+            }
+
+            AecToolType.COUNT -> {
+                Modifier.pointerInput(currentAecTool, currentPageIndex, penColor) {
+                    detectTapGestures { offset ->
+                        val info = latestPageInfo
+                        val norm = screenToNormalized(offset, info)
+                        val nextCount = latestTakeoffItems.count { it.type == MeasurementType.COUNT } + 1
+                        val formattedCount = MeasureCalculator.formatMeasurement(
+                            MeasurementType.COUNT,
+                            nextCount.toFloat(),
+                            "Stk"
+                        )
+                        latestOnAddTakeoffItem(
+                            MeasurementItem(
+                                pageIndex = currentPageIndex,
+                                type = MeasurementType.COUNT,
+                                points = listOf(Offset(norm.x, norm.y)),
+                                calculatedValue = nextCount.toFloat(),
+                                unit = "Stk",
+                                formattedText = formattedCount,
+                                label = "#$nextCount"
+                            )
+                        )
+                    }
+                }
+            }
+
+            AecToolType.NONE -> Modifier
+        }
+    } else when (activeTool) {
         AnnotationType.PEN, AnnotationType.HIGHLIGHTER -> {
             Modifier.pointerInput(activeTool, penColor, penStrokeWidth, pendingStroke) {
                 var lastMoveTime = 0L
                 var lastMovePos = Offset.Zero
-                
+
+                fun launchShapeRecognition() {
+                    if (activeTool != AnnotationType.PEN) return
+                    shapeRecognitionJob = coroutineScope.launch {
+                        var isHolding = false
+                        while (true) {
+                            delay(100)
+                            val now = System.currentTimeMillis()
+                            if (now - lastMoveTime >= 600 && !isHolding) {
+                                isHolding = true
+                                shapeRecognitionCountdown = 3
+                                pendingStroke = Annotation.Stroke(
+                                    pageIndex = currentPageIndex,
+                                    path = DrawingPath(currentPoints, penColor, penStrokeWidth, false)
+                                )
+
+                                while (shapeRecognitionCountdown > 0) {
+                                    val normOffsets = currentPoints.map { Offset(it.x, it.y) }
+                                    recognizedShape = ShapeRecognizer.recognize(normOffsets)
+                                    delay(400)
+                                    shapeRecognitionCountdown--
+                                    pendingStroke = Annotation.Stroke(
+                                        pageIndex = currentPageIndex,
+                                        path = DrawingPath(currentPoints, penColor, penStrokeWidth, false)
+                                    )
+                                }
+
+                                val normOffsets = currentPoints.map { Offset(it.x, it.y) }
+                                val shape = ShapeRecognizer.recognize(normOffsets)
+                                val shapeAnnotation = ShapeRecognizer.toAnnotation(
+                                    shape = shape,
+                                    pageIndex = currentPageIndex,
+                                    color = penColor,
+                                    strokeWidth = penStrokeWidth
+                                )
+
+                                if (shapeAnnotation != null) {
+                                    onAddAnnotation(shapeAnnotation)
+                                } else {
+                                    onAddAnnotation(
+                                        Annotation.Stroke(
+                                            pageIndex = currentPageIndex,
+                                            path = DrawingPath(currentPoints, penColor, penStrokeWidth, false)
+                                        )
+                                    )
+                                }
+
+                                currentPoints = emptyList()
+                                pendingStroke = null
+                                shapeRecognitionCountdown = 0
+                                recognizedShape = null
+                                break
+                            }
+                        }
+                    }
+                }
+
                 detectDragGestures(
                     onDragStart = { offset ->
                         shapeRecognitionJob?.cancel()
                         pendingStroke = null
                         shapeRecognitionCountdown = 0
                         recognizedShape = null
-                        
+
                         currentPoints = listOf(screenToNormalized(offset, pageInfo))
                         dragStart = null
                         dragCurrent = null
-                        
+
                         lastMoveTime = System.currentTimeMillis()
                         lastMovePos = offset
-                        
-                        if (activeTool == AnnotationType.PEN) {
-                            shapeRecognitionJob = coroutineScope.launch {
-                                var isHolding = false
-                                while (true) {
-                                    delay(100)
-                                    val now = System.currentTimeMillis()
-                                    if (now - lastMoveTime >= 1000 && !isHolding) {
-                                        isHolding = true
-                                        shapeRecognitionCountdown = 3
-                                        pendingStroke = Annotation.Stroke(
-                                            pageIndex = currentPageIndex,
-                                            path = DrawingPath(currentPoints, penColor, penStrokeWidth, false)
-                                        )
-                                        
-                                        while (shapeRecognitionCountdown > 0) {
-                                            val screenPoints = currentPoints.map { normalizedToScreen(it, pageInfo) }
-                                            recognizedShape = ShapeRecognizer.recognize(screenPoints)
-                                            
-                                            delay(1000)
-                                            shapeRecognitionCountdown--
-                                            
-                                            pendingStroke = Annotation.Stroke(
-                                                pageIndex = currentPageIndex,
-                                                path = DrawingPath(currentPoints, penColor, penStrokeWidth, false)
-                                            )
-                                        }
-                                        
-                                        // Auto-shape recognition complete!
-                                        val screenPoints = currentPoints.map { normalizedToScreen(it, pageInfo) }
-                                        val shape = ShapeRecognizer.recognize(screenPoints)
-                                        val shapeAnnotation = ShapeRecognizer.toAnnotation(
-                                            shape = shape,
-                                            pageIndex = currentPageIndex,
-                                            color = penColor,
-                                            strokeWidth = penStrokeWidth
-                                        )
-                                        
-                                        if (shapeAnnotation != null) {
-                                            onAddAnnotation(shapeAnnotation)
-                                        } else {
-                                            onAddAnnotation(
-                                                Annotation.Stroke(
-                                                    pageIndex = currentPageIndex,
-                                                    path = DrawingPath(currentPoints, penColor, penStrokeWidth, false)
-                                                )
-                                            )
-                                        }
-                                        
-                                        currentPoints = emptyList()
-                                        pendingStroke = null
-                                        shapeRecognitionCountdown = 0
-                                        recognizedShape = null
-                                        break
-                                    }
-                                }
-                            }
-                        }
+                        launchShapeRecognition()
                     },
                     onDrag = { change, _ ->
                         change.consume()
                         val pos = change.position
                         val normalized = screenToNormalized(pos, pageInfo)
                         currentPoints = currentPoints + normalized
-                        
+
                         val dist = (pos - lastMovePos).getDistance()
                         if (dist > 15f) {
                             lastMoveTime = System.currentTimeMillis()
                             lastMovePos = pos
-                            
+
                             if (pendingStroke != null) {
                                 pendingStroke = null
                                 shapeRecognitionCountdown = 0
                                 recognizedShape = null
-                                
                                 shapeRecognitionJob?.cancel()
-                                if (activeTool == AnnotationType.PEN) {
-                                    shapeRecognitionJob = coroutineScope.launch {
-                                        var isHolding = false
-                                        while (true) {
-                                            delay(100)
-                                            val now = System.currentTimeMillis()
-                                            if (now - lastMoveTime >= 1000 && !isHolding) {
-                                                isHolding = true
-                                                shapeRecognitionCountdown = 3
-                                                pendingStroke = Annotation.Stroke(
-                                                    pageIndex = currentPageIndex,
-                                                    path = DrawingPath(currentPoints, penColor, penStrokeWidth, false)
-                                                )
-                                                while (shapeRecognitionCountdown > 0) {
-                                                    val screenPoints = currentPoints.map { normalizedToScreen(it, pageInfo) }
-                                                    recognizedShape = ShapeRecognizer.recognize(screenPoints)
-                                                    delay(1000)
-                                                    shapeRecognitionCountdown--
-                                                    pendingStroke = Annotation.Stroke(
-                                                        pageIndex = currentPageIndex,
-                                                        path = DrawingPath(currentPoints, penColor, penStrokeWidth, false)
-                                                    )
-                                                }
-                                                val screenPoints = currentPoints.map { normalizedToScreen(it, pageInfo) }
-                                                val shape = ShapeRecognizer.recognize(screenPoints)
-                                                val shapeAnnotation = ShapeRecognizer.toAnnotation(
-                                                    shape = shape,
-                                                    pageIndex = currentPageIndex,
-                                                    color = penColor,
-                                                    strokeWidth = penStrokeWidth
-                                                )
-                                                if (shapeAnnotation != null) {
-                                                    onAddAnnotation(shapeAnnotation)
-                                                } else {
-                                                    onAddAnnotation(
-                                                        Annotation.Stroke(
-                                                            pageIndex = currentPageIndex,
-                                                            path = DrawingPath(currentPoints, penColor, penStrokeWidth, false)
-                                                        )
-                                                    )
-                                                }
-                                                currentPoints = emptyList()
-                                                pendingStroke = null
-                                                shapeRecognitionCountdown = 0
-                                                recognizedShape = null
-                                                break
-                                            }
-                                        }
-                                    }
-                                }
+                                launchShapeRecognition()
                             }
                         }
                     },
@@ -657,7 +792,7 @@ fun AnnotationCanvas(
         }
 
         AnnotationType.ERASER -> {
-            Modifier.pointerInput(annotations, strokeBoundsCache) {
+            Modifier.pointerInput(annotations, pageTakeoffItems, strokeBoundsCache) {
                 detectDragGestures(
                     onDragStart = { offset ->
                         dragStart = offset
@@ -666,13 +801,21 @@ fun AnnotationCanvas(
                         val hit = annotations.findLast { annotation ->
                             annotationHitTest(annotation, normalized, pad, strokeBoundsCache)
                         }
-                        hit?.let { onRemoveAnnotation(it.id) }
+                        if (hit != null) {
+                            onRemoveAnnotation(hit.id)
+                        } else {
+                            val hitItem = pageTakeoffItems.findLast { item ->
+                                measurementHitTest(item, Offset(normalized.x, normalized.y), pad)
+                            }
+                            hitItem?.let { latestOnRemoveTakeoffItem(it.id) }
+                        }
                     },
                     onDrag = { change, _ ->
                         change.consume()
                         dragCurrent = change.position
-                        
+
                         val currentAnnotations = annotations.toList()
+                        val currentItems = latestPageTakeoffItems
                         coroutineScope.launch(Dispatchers.Default) {
                             val normalized = screenToNormalized(change.position, pageInfo)
                             val pad = 0.02f
@@ -682,6 +825,15 @@ fun AnnotationCanvas(
                             if (hit != null) {
                                 launch(Dispatchers.Main) {
                                     onRemoveAnnotation(hit.id)
+                                }
+                            } else {
+                                val hitItem = currentItems.findLast { item ->
+                                    measurementHitTest(item, Offset(normalized.x, normalized.y), pad)
+                                }
+                                if (hitItem != null) {
+                                    launch(Dispatchers.Main) {
+                                        latestOnRemoveTakeoffItem(hitItem.id)
+                                    }
                                 }
                             }
                         }
@@ -707,6 +859,11 @@ fun AnnotationCanvas(
         // Draw existing annotations
         for (annotation in annotations) {
             drawAnnotation(annotation, pageInfo, imageBitmapCache, signatureBitmapCache)
+        }
+
+        // Draw AEC measurements for current page
+        for (item in pageTakeoffItems) {
+            drawMeasurement(item, pageInfo)
         }
 
         // Draw in-progress stroke
@@ -761,15 +918,41 @@ fun AnnotationCanvas(
             // Draw recognized shape preview (if any)
             recognizedShape?.let { shape ->
                 when (shape) {
+                    is RecognizedShape.Line -> {
+                        val p0 = normalizedToScreen(PathPoint(shape.start.x, shape.start.y), pageInfo)
+                        val p1 = normalizedToScreen(PathPoint(shape.end.x, shape.end.y), pageInfo)
+                        drawLine(
+                            color = penColor.copy(alpha = 0.45f),
+                            start = p0,
+                            end = p1,
+                            strokeWidth = penStrokeWidth.coerceAtLeast(3f),
+                            cap = StrokeCap.Round
+                        )
+                    }
                     is RecognizedShape.Circle -> {
                         val center = normalizedToScreen(
                             PathPoint(shape.center.x, shape.center.y), pageInfo
                         )
-                        val radius = shape.radius * pageInfo.pageWidth
+                        val radius = shape.radius * min(pageInfo.pageWidth, pageInfo.pageHeight)
                         drawCircle(
                             color = penColor.copy(alpha = 0.3f),
                             radius = radius,
                             center = center,
+                            style = Stroke(width = 4f)
+                        )
+                    }
+                    is RecognizedShape.Ellipse -> {
+                        val topLeft = normalizedToScreen(
+                            PathPoint(shape.center.x - shape.radiusX, shape.center.y - shape.radiusY),
+                            pageInfo
+                        )
+                        drawRect(
+                            color = penColor.copy(alpha = 0.3f),
+                            topLeft = topLeft,
+                            size = Size(
+                                shape.radiusX * 2f * pageInfo.pageWidth,
+                                shape.radiusY * 2f * pageInfo.pageHeight
+                            ),
                             style = Stroke(width = 4f)
                         )
                     }
@@ -956,6 +1139,85 @@ fun AnnotationCanvas(
             }
         }
         
+        // Draw AEC live previews
+        if (currentAecTool == AecToolType.DISTANCE && dragStart != null && dragCurrent != null) {
+            val s = dragStart!!
+            val e = dragCurrent!!
+            drawLine(color = penColor, start = s, end = e, strokeWidth = 4f, cap = StrokeCap.Round)
+            drawCircle(color = penColor, radius = 7f, center = s)
+            drawCircle(color = penColor, radius = 7f, center = e)
+            val sNorm = screenToNormalized(s, pageInfo)
+            val eNorm = screenToNormalized(e, pageInfo)
+            val realVal = MeasureCalculator.calculateDistance(
+                Offset(sNorm.x, sNorm.y),
+                Offset(eNorm.x, eNorm.y),
+                pageInfo.pdfPointWidth,
+                pageInfo.pdfPointHeight,
+                drawingScale
+            )
+            val label = MeasureCalculator.formatMeasurement(
+                MeasurementType.DISTANCE,
+                realVal,
+                drawingScale.unit
+            )
+            drawMeasurementLabelPill(Offset((s.x + e.x) / 2f, (s.y + e.y) / 2f - 28f), label, penColor)
+        } else if (currentAecTool == AecToolType.REVISION_CLOUD && dragStart != null && dragCurrent != null) {
+            val l = min(dragStart!!.x, dragCurrent!!.x)
+            val t = min(dragStart!!.y, dragCurrent!!.y)
+            val r = max(dragStart!!.x, dragCurrent!!.x)
+            val b = max(dragStart!!.y, dragCurrent!!.y)
+            if (r - l > 12f && b - t > 12f) {
+                drawRevisionCloudRect(Offset(l, t), Size(r - l, b - t), penColor)
+            }
+        } else if (currentAecTool == AecToolType.CALLOUT && dragStart != null && dragCurrent != null) {
+            drawCalloutArrowAndBadge(tip = dragStart!!, anchor = dragCurrent!!, label = "Callout...", color = penColor)
+        }
+
+        if (currentAecTool == AecToolType.AREA && pendingAreaPoints.isNotEmpty()) {
+            val screenPts = pendingAreaPoints.map {
+                normalizedToScreen(PathPoint(it.x, it.y), pageInfo)
+            }
+            if (screenPts.size >= 3) {
+                val polyPath = Path().apply {
+                    moveTo(screenPts.first().x, screenPts.first().y)
+                    for (i in 1 until screenPts.size) lineTo(screenPts[i].x, screenPts[i].y)
+                    close()
+                }
+                drawPath(path = polyPath, color = penColor.copy(alpha = 0.18f))
+                drawPath(path = polyPath, color = penColor, style = Stroke(width = 3f))
+                val realArea = MeasureCalculator.calculatePolygonArea(
+                    pendingAreaPoints,
+                    pageInfo.pdfPointWidth,
+                    pageInfo.pdfPointHeight,
+                    drawingScale
+                )
+                val areaLabel = MeasureCalculator.formatMeasurement(
+                    MeasurementType.AREA,
+                    realArea,
+                    drawingScale.unit
+                )
+                val cx = screenPts.map { it.x }.average().toFloat()
+                val cy = screenPts.map { it.y }.average().toFloat()
+                drawMeasurementLabelPill(Offset(cx, cy), areaLabel, penColor)
+            } else if (screenPts.size == 2) {
+                drawLine(color = penColor, start = screenPts[0], end = screenPts[1], strokeWidth = 3f)
+            }
+            screenPts.forEachIndexed { idx, pt ->
+                val isSnapStart = idx == 0 && screenPts.size >= 3
+                drawCircle(
+                    color = if (isSnapStart) Color(0xFF4CAF50) else Color.White,
+                    radius = if (isSnapStart) 12f else 8f,
+                    center = pt
+                )
+                drawCircle(
+                    color = penColor,
+                    radius = if (isSnapStart) 12f else 8f,
+                    center = pt,
+                    style = Stroke(width = 3f)
+                )
+            }
+        }
+
         // Draw eraser cursor
         if (activeTool == AnnotationType.ERASER && dragCurrent != null) {
             val eraserRadius = 20f
@@ -986,17 +1248,18 @@ fun AnnotationCanvas(
 fun AnnotationDisplayOverlay(
     annotations: List<Annotation>,
     pageInfo: PdfPageInfo,
+    takeoffItems: List<MeasurementItem> = emptyList(),
     onCommentTapped: ((Annotation.Comment) -> Unit)? = null,
     onTextBoxDoubleTapped: ((Annotation.TextBox) -> Unit)? = null,
     externalImageCache: Map<String, ImageBitmap?>? = null,
     modifier: Modifier = Modifier
 ) {
-    if (annotations.isEmpty()) return
+    if (annotations.isEmpty() && takeoffItems.isEmpty()) return
 
     val context = LocalContext.current
     val localImageBitmapCache = remember { mutableMapOf<String, ImageBitmap?>() }
     val imageBitmapCache: Map<String, ImageBitmap?> = externalImageCache ?: localImageBitmapCache
-    
+
     val signatureBitmapCache = remember(annotations) {
         annotations.filterIsInstance<Annotation.Signature>().associate { sig ->
             sig.id to try {
@@ -1020,37 +1283,13 @@ fun AnnotationDisplayOverlay(
         }
     }
 
-    val hasCallbacks = onCommentTapped != null || onTextBoxDoubleTapped != null
-    val tapModifier = if (hasCallbacks) {
-        Modifier.pointerInput(annotations, pageInfo) {
-            detectTapGestures(
-                onTap = { offset ->
-                    if (onCommentTapped != null) {
-                        val normalized = screenToNormalized(offset, pageInfo)
-                        val threshold = 0.04f
-                        val hit = annotations.filterIsInstance<Annotation.Comment>().findLast { c ->
-                            abs(c.x - normalized.x) < threshold && abs(c.y - normalized.y) < threshold
-                        }
-                        hit?.let { onCommentTapped(it) }
-                    }
-                },
-                onDoubleTap = { offset ->
-                    if (onTextBoxDoubleTapped != null) {
-                        val normalized = screenToNormalized(offset, pageInfo)
-                        val hit = annotations.filterIsInstance<Annotation.TextBox>().findLast { tb ->
-                            normalized.x in tb.x..(tb.x + tb.width) &&
-                                    normalized.y in tb.y..(tb.y + tb.height)
-                        }
-                        hit?.let { onTextBoxDoubleTapped(it) }
-                    }
-                }
-            )
-        }
-    } else Modifier
-
-    Canvas(modifier = modifier.fillMaxSize().then(tapModifier)) {
+    // Touch events pass through unhindered so PDFView scroll, pinch-zoom, and onTap continue working.
+    Canvas(modifier = modifier.fillMaxSize()) {
         for (annotation in annotations) {
             drawAnnotation(annotation, pageInfo, imageBitmapCache, signatureBitmapCache)
+        }
+        for (item in takeoffItems) {
+            drawMeasurement(item, pageInfo)
         }
     }
 }
@@ -1502,6 +1741,42 @@ internal fun DrawScope.drawAnnotation(
                 radius = 6f,
                 center = pos
             )
+            if (annotation.text.isNotBlank()) {
+                val preview = if (annotation.text.length > 25) {
+                    annotation.text.take(25) + "…"
+                } else {
+                    annotation.text
+                }
+                val badgePaint = AndroidPaint().apply {
+                    isAntiAlias = true
+                    color = android.graphics.Color.parseColor("#222222")
+                    textSize = 11f * density
+                }
+                val textWidth = badgePaint.measureText(preview)
+                val padX = 8f * density
+                val badgeH = 20f * density
+                val badgeLeft = pos.x + 16f
+                val badgeTop = pos.y - badgeH / 2f
+                drawRoundRect(
+                    color = Color(0xFFFFF8E1).copy(alpha = 0.94f),
+                    topLeft = Offset(badgeLeft, badgeTop),
+                    size = Size(textWidth + padX * 2f, badgeH),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f * density)
+                )
+                drawRoundRect(
+                    color = annotation.color.copy(alpha = 0.85f),
+                    topLeft = Offset(badgeLeft, badgeTop),
+                    size = Size(textWidth + padX * 2f, badgeH),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f * density),
+                    style = Stroke(width = 1.5f)
+                )
+                drawContext.canvas.nativeCanvas.drawText(
+                    preview,
+                    badgeLeft + padX,
+                    pos.y + badgePaint.textSize * 0.35f,
+                    badgePaint
+                )
+            }
         }
 
         is Annotation.Shape -> {
@@ -1585,8 +1860,41 @@ internal fun DrawScope.drawAnnotation(
             )
             val tableW = bottomRight.x - topLeft.x
             val tableH = bottomRight.y - topLeft.y
-            val cellW = tableW / annotation.cols
-            val cellH = tableH / annotation.rows
+            val cellW = tableW / annotation.cols.coerceAtLeast(1)
+            val cellH = tableH / annotation.rows.coerceAtLeast(1)
+
+            // Crisp background behind grid and text
+            drawRect(
+                color = Color.White.copy(alpha = 0.85f),
+                topLeft = topLeft,
+                size = Size(tableW, tableH)
+            )
+
+            // Render cell contents inside clipped cell bounds
+            val cellTextPaint = AndroidPaint().apply {
+                isAntiAlias = true
+                color = android.graphics.Color.parseColor("#1E1E1E")
+                textSize = (cellH * 0.42f).coerceIn(10f * density, 16f * density)
+            }
+            val nativeCanvas = drawContext.canvas.nativeCanvas
+            for (row in 0 until annotation.rows) {
+                for (col in 0 until annotation.cols) {
+                    val cellText = annotation.cells.getOrNull(row)?.getOrNull(col).orEmpty()
+                    if (cellText.isNotEmpty()) {
+                        val cLeft = topLeft.x + col * cellW
+                        val cTop = topLeft.y + row * cellH
+                        nativeCanvas.save()
+                        nativeCanvas.clipRect(cLeft + 2f, cTop + 2f, cLeft + cellW - 2f, cTop + cellH - 2f)
+                        nativeCanvas.drawText(
+                            cellText,
+                            cLeft + 6f * density,
+                            cTop + cellH / 2f + cellTextPaint.textSize * 0.35f,
+                            cellTextPaint
+                        )
+                        nativeCanvas.restore()
+                    }
+                }
+            }
 
             // Draw cell borders
             for (row in 0..annotation.rows) {
@@ -1901,4 +2209,319 @@ private fun DrawScope.drawPathFromPoints(
         ),
         blendMode = blendMode
     )
+}
+
+private fun measurementAccentColor(type: MeasurementType): Color = when (type) {
+    MeasurementType.DISTANCE -> Color(0xFFE53935)
+    MeasurementType.AREA -> Color(0xFF1E88E5)
+    MeasurementType.PERIMETER -> Color(0xFF8E24AA)
+    MeasurementType.COUNT -> Color(0xFF43A047)
+    MeasurementType.REVISION_CLOUD -> Color(0xFFFB8C00)
+    MeasurementType.CALLOUT -> Color(0xFFD81B60)
+}
+
+internal fun DrawScope.drawMeasurement(
+    item: MeasurementItem,
+    pageInfo: PdfPageInfo
+) {
+    if (item.points.isEmpty()) return
+    val color = measurementAccentColor(item.type)
+    val screenPts = item.points.map {
+        normalizedToScreen(PathPoint(it.x, it.y), pageInfo)
+    }
+    val displayLabel = item.formattedText.ifBlank {
+        item.label.ifBlank {
+            MeasureCalculator.formatMeasurement(item.type, item.calculatedValue, item.unit)
+        }
+    }
+
+    when (item.type) {
+        MeasurementType.DISTANCE -> {
+            if (screenPts.size < 2) return
+            val s = screenPts[0]
+            val e = screenPts[1]
+            drawLine(color = color, start = s, end = e, strokeWidth = 4f, cap = StrokeCap.Round)
+            // Perpendicular end ticks
+            val dx = e.x - s.x
+            val dy = e.y - s.y
+            val len = hypot(dx, dy).coerceAtLeast(1f)
+            val nx = -dy / len * 10f
+            val ny = dx / len * 10f
+            drawLine(color = color, start = Offset(s.x - nx, s.y - ny), end = Offset(s.x + nx, s.y + ny), strokeWidth = 3f)
+            drawLine(color = color, start = Offset(e.x - nx, e.y - ny), end = Offset(e.x + nx, e.y + ny), strokeWidth = 3f)
+            drawMeasurementLabelPill(Offset((s.x + e.x) / 2f, (s.y + e.y) / 2f - 24f), displayLabel, color)
+        }
+
+        MeasurementType.AREA -> {
+            if (screenPts.size < 3) return
+            val poly = Path().apply {
+                moveTo(screenPts.first().x, screenPts.first().y)
+                for (i in 1 until screenPts.size) lineTo(screenPts[i].x, screenPts[i].y)
+                close()
+            }
+            drawPath(path = poly, color = color.copy(alpha = 0.20f))
+            drawPath(path = poly, color = color, style = Stroke(width = 3f))
+            screenPts.forEach { pt ->
+                drawCircle(color = Color.White, radius = 6f, center = pt)
+                drawCircle(color = color, radius = 6f, center = pt, style = Stroke(width = 2.5f))
+            }
+            val cx = screenPts.map { it.x }.average().toFloat()
+            val cy = screenPts.map { it.y }.average().toFloat()
+            drawMeasurementLabelPill(Offset(cx, cy), displayLabel, color)
+        }
+
+        MeasurementType.PERIMETER -> {
+            if (screenPts.size < 2) return
+            val polyPath = Path().apply {
+                moveTo(screenPts.first().x, screenPts.first().y)
+                for (i in 1 until screenPts.size) lineTo(screenPts[i].x, screenPts[i].y)
+            }
+            drawPath(path = polyPath, color = color, style = Stroke(width = 3f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            screenPts.forEach { pt ->
+                drawCircle(color = Color.White, radius = 6f, center = pt)
+                drawCircle(color = color, radius = 6f, center = pt, style = Stroke(width = 2.5f))
+            }
+            val cx = screenPts.map { it.x }.average().toFloat()
+            val cy = screenPts.map { it.y }.average().toFloat()
+            drawMeasurementLabelPill(Offset(cx, cy), displayLabel, color)
+        }
+
+        MeasurementType.COUNT -> {
+            val pt = screenPts.first()
+            val radius = 16f * density
+            drawCircle(color = color, radius = radius, center = pt)
+            drawCircle(color = Color.White, radius = radius, center = pt, style = Stroke(width = 2.5f))
+            val text = item.label.ifBlank { "#${item.calculatedValue.toInt()}" }
+            val paint = AndroidPaint().apply {
+                isAntiAlias = true
+                this.color = android.graphics.Color.WHITE
+                textSize = 11f * density
+                textAlign = AndroidPaint.Align.CENTER
+                typeface = Typeface.DEFAULT_BOLD
+            }
+            drawContext.canvas.nativeCanvas.drawText(
+                text,
+                pt.x,
+                pt.y + paint.textSize * 0.35f,
+                paint
+            )
+        }
+
+        MeasurementType.REVISION_CLOUD -> {
+            if (screenPts.size < 2) return
+            val left = min(screenPts[0].x, screenPts[1].x)
+            val top = min(screenPts[0].y, screenPts[1].y)
+            val right = max(screenPts[0].x, screenPts[1].x)
+            val bottom = max(screenPts[0].y, screenPts[1].y)
+            drawRevisionCloudRect(Offset(left, top), Size(right - left, bottom - top), color)
+        }
+
+        MeasurementType.CALLOUT -> {
+            if (screenPts.size < 2) return
+            val tip = screenPts[0]
+            val anchor = screenPts[1]
+            val calloutLabel = item.label.ifBlank { item.formattedText }
+            drawCalloutArrowAndBadge(tip = tip, anchor = anchor, label = calloutLabel, color = color)
+        }
+    }
+}
+
+private fun DrawScope.drawMeasurementLabelPill(
+    center: Offset,
+    text: String,
+    accentColor: Color
+) {
+    if (text.isBlank()) return
+    val paint = AndroidPaint().apply {
+        isAntiAlias = true
+        color = android.graphics.Color.WHITE
+        textSize = 11f * density
+        textAlign = AndroidPaint.Align.CENTER
+        typeface = Typeface.DEFAULT_BOLD
+    }
+    val textW = paint.measureText(text)
+    val padX = 8f * density
+    val pillW = textW + padX * 2f
+    val pillH = 22f * density
+    val topLeft = Offset(center.x - pillW / 2f, center.y - pillH / 2f)
+    drawRoundRect(
+        color = Color(0xFF1A1C22).copy(alpha = 0.88f),
+        topLeft = topLeft,
+        size = Size(pillW, pillH),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(10f * density)
+    )
+    drawRoundRect(
+        color = accentColor,
+        topLeft = topLeft,
+        size = Size(pillW, pillH),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(10f * density),
+        style = Stroke(width = 1.5f)
+    )
+    drawContext.canvas.nativeCanvas.drawText(
+        text,
+        center.x,
+        center.y + paint.textSize * 0.35f,
+        paint
+    )
+}
+
+private fun DrawScope.drawRevisionCloudRect(
+    topLeft: Offset,
+    size: Size,
+    color: Color
+) {
+    val left = topLeft.x
+    val top = topLeft.y
+    val right = left + size.width
+    val bottom = top + size.height
+    val radius = (minOf(size.width, size.height) * 0.14f).coerceIn(10f, 24f)
+
+    fun drawScallopedEdge(start: Offset, end: Offset) {
+        val dx = end.x - start.x
+        val dy = end.y - start.y
+        val len = hypot(dx, dy)
+        if (len < 1f) return
+        val count = max(1, (len / (radius * 1.6f)).toInt())
+        val stepX = dx / count
+        val stepY = dy / count
+        val ux = -dy / len
+        val uy = dx / len
+        val path = Path().apply {
+            moveTo(start.x, start.y)
+            for (i in 0 until count) {
+                val p1x = start.x + stepX * i
+                val p1y = start.y + stepY * i
+                val p2x = start.x + stepX * (i + 1)
+                val p2y = start.y + stepY * (i + 1)
+                val midX = (p1x + p2x) / 2f + ux * radius * 0.9f
+                val midY = (p1y + p2y) / 2f + uy * radius * 0.9f
+                quadraticBezierTo(midX, midY, p2x, p2y)
+            }
+        }
+        drawPath(path = path, color = color, style = Stroke(width = 3f, cap = StrokeCap.Round))
+    }
+
+    drawRect(color = color.copy(alpha = 0.06f), topLeft = topLeft, size = size)
+    drawScallopedEdge(Offset(left, top), Offset(right, top))
+    drawScallopedEdge(Offset(right, top), Offset(right, bottom))
+    drawScallopedEdge(Offset(right, bottom), Offset(left, bottom))
+    drawScallopedEdge(Offset(left, bottom), Offset(left, top))
+}
+
+private fun DrawScope.drawCalloutArrowAndBadge(
+    tip: Offset,
+    anchor: Offset,
+    label: String,
+    color: Color
+) {
+    drawLine(color = color, start = anchor, end = tip, strokeWidth = 3f, cap = StrokeCap.Round)
+    val angle = atan2(tip.y - anchor.y, tip.x - anchor.x)
+    val headLen = 14f * density
+    val spread = (28f * PI / 180f).toFloat()
+    val p1 = Offset(
+        tip.x - headLen * cos(angle - spread),
+        tip.y - headLen * sin(angle - spread)
+    )
+    val p2 = Offset(
+        tip.x - headLen * cos(angle + spread),
+        tip.y - headLen * sin(angle + spread)
+    )
+    val headPath = Path().apply {
+        moveTo(tip.x, tip.y)
+        lineTo(p1.x, p1.y)
+        lineTo(p2.x, p2.y)
+        close()
+    }
+    drawPath(path = headPath, color = color)
+
+    val text = label.ifBlank { "Callout" }
+    val paint = AndroidPaint().apply {
+        isAntiAlias = true
+        this.color = android.graphics.Color.WHITE
+        textSize = 11f * density
+        typeface = Typeface.DEFAULT_BOLD
+    }
+    val textW = paint.measureText(text)
+    val padX = 8f * density
+    val boxW = textW + padX * 2f
+    val boxH = 22f * density
+    val boxTopLeft = Offset(anchor.x - boxW / 2f, anchor.y - boxH / 2f)
+    drawRoundRect(
+        color = color,
+        topLeft = boxTopLeft,
+        size = Size(boxW, boxH),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f * density)
+    )
+    drawContext.canvas.nativeCanvas.drawText(
+        text,
+        boxTopLeft.x + padX,
+        anchor.y + paint.textSize * 0.35f,
+        paint
+    )
+}
+
+internal fun measurementHitTest(
+    item: MeasurementItem,
+    norm: Offset,
+    pad: Float
+): Boolean {
+    if (item.points.isEmpty()) return false
+    return when (item.type) {
+        MeasurementType.COUNT -> {
+            val p = item.points.first()
+            abs(p.x - norm.x) < pad * 3f && abs(p.y - norm.y) < pad * 3f
+        }
+        MeasurementType.DISTANCE, MeasurementType.CALLOUT -> {
+            if (item.points.size < 2) false
+            else pointToSegmentDistance(norm, item.points[0], item.points[1]) < pad * 1.5f
+        }
+        MeasurementType.PERIMETER -> {
+            if (item.points.size < 2) false
+            else (0 until item.points.size - 1).any { i ->
+                pointToSegmentDistance(norm, item.points[i], item.points[i + 1]) < pad * 1.5f
+            }
+        }
+        MeasurementType.REVISION_CLOUD -> {
+            if (item.points.size < 2) false
+            else {
+                val minX = min(item.points[0].x, item.points[1].x)
+                val maxX = max(item.points[0].x, item.points[1].x)
+                val minY = min(item.points[0].y, item.points[1].y)
+                val maxY = max(item.points[0].y, item.points[1].y)
+                norm.x in (minX - pad)..(maxX + pad) && norm.y in (minY - pad)..(maxY + pad)
+            }
+        }
+        MeasurementType.AREA -> {
+            if (item.points.size < 3) return false
+            for (i in item.points.indices) {
+                val a = item.points[i]
+                val b = item.points[(i + 1) % item.points.size]
+                if (pointToSegmentDistance(norm, a, b) < pad * 1.5f) return true
+            }
+            var inside = false
+            var j = item.points.lastIndex
+            for (i in item.points.indices) {
+                val xi = item.points[i].x
+                val yi = item.points[i].y
+                val xj = item.points[j].x
+                val yj = item.points[j].y
+                val intersect = ((yi > norm.y) != (yj > norm.y)) &&
+                    (norm.x < (xj - xi) * (norm.y - yi) / ((yj - yi).let { if (abs(it) < 1e-6f) 1e-6f else it }) + xi)
+                if (intersect) inside = !inside
+                j = i
+            }
+            inside
+        }
+    }
+}
+
+private fun pointToSegmentDistance(p: Offset, a: Offset, b: Offset): Float {
+    val dx = b.x - a.x
+    val dy = b.y - a.y
+    val lenSq = dx * dx + dy * dy
+    if (lenSq < 1e-8f) return hypot(p.x - a.x, p.y - a.y)
+    val t = (((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq).coerceIn(0f, 1f)
+    val projX = a.x + t * dx
+    val projY = a.y + t * dy
+    return hypot(p.x - projX, p.y - projY)
 }

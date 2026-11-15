@@ -53,33 +53,42 @@ private suspend fun searchPdfText(
 ): List<SearchResult> = withContext(Dispatchers.IO) {
     if (query.isBlank()) return@withContext emptyList()
     val results = mutableListOf<SearchResult>()
+    val tmpFile = File(context.cacheDir, "search_tmp.pdf")
     try {
         // Copy URI to a temporary file so PDFBox can read it
-        val tmpFile = File(context.cacheDir, "search_tmp.pdf")
         context.contentResolver.openInputStream(pdfUri)?.use { input ->
             FileOutputStream(tmpFile).use { output -> input.copyTo(output) }
-        }
+        } ?: return@withContext emptyList()
+
         com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(context)
-        val doc = com.tom_roush.pdfbox.pdmodel.PDDocument.load(tmpFile)
-        val stripper = com.tom_roush.pdfbox.text.PDFTextStripper()
-        val pageCount = doc.numberOfPages
-        for (i in 0 until pageCount) {
-            stripper.startPage = i + 1
-            stripper.endPage = i + 1
-            val text = stripper.getText(doc)
-            val lower = text.lowercase()
+        com.tom_roush.pdfbox.pdmodel.PDDocument.load(tmpFile).use { doc ->
+            val stripper = com.tom_roush.pdfbox.text.PDFTextStripper()
+            val pageCount = doc.numberOfPages
             val queryLower = query.lowercase()
-            if (lower.contains(queryLower)) {
-                // Build a short snippet around the first occurrence
-                val idx = lower.indexOf(queryLower)
-                val start = (idx - 60).coerceAtLeast(0)
-                val end = (idx + query.length + 60).coerceAtMost(text.length)
-                val snippet = text.substring(start, end).replace('\n', ' ').trim()
-                results.add(SearchResult(page = i, snippet = snippet))
+            val maxResults = 50
+            for (i in 0 until pageCount) {
+                if (results.size >= maxResults) break
+                stripper.startPage = i + 1
+                stripper.endPage = i + 1
+                val text = stripper.getText(doc)
+                val lower = text.lowercase()
+                var searchFrom = 0
+                while (results.size < maxResults) {
+                    val idx = lower.indexOf(queryLower, searchFrom)
+                    if (idx < 0) break
+                    val start = (idx - 60).coerceAtLeast(0)
+                    val end = (idx + query.length + 60).coerceAtMost(text.length)
+                    val snippet = text.substring(start, end).replace('\n', ' ').replace('\r', ' ').trim()
+                    results.add(SearchResult(page = i, snippet = snippet))
+                    searchFrom = idx + query.length.coerceAtLeast(1)
+                }
             }
         }
-        doc.close()
-    } catch (_: Exception) { /* ignore */ }
+    } catch (_: Exception) {
+        /* ignore */
+    } finally {
+        tmpFile.delete()
+    }
     results
 }
 
